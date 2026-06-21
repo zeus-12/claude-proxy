@@ -163,9 +163,18 @@ the version.
 To build a test artifact without publishing, run the workflow manually from the
 **Actions** tab (it builds and uploads an artifact but creates no Release).
 
-> First-time setup: the workflow file must already be on `main` before the first
-> tag, and **Settings → Actions → General → Workflow permissions** must be set to
-> **Read and write** so the release can be created.
+> First-time setup:
+>
+> - The workflow file must already be on `main` before the first tag, or the tag
+>   triggers nothing.
+> - **Settings → Actions → General → Workflow permissions** must be set to **Read
+>   and write** so the release can be created.
+> - Pushing any file under `.github/workflows/` needs a token with the `workflow`
+>   scope. If `git push` is rejected with *"refusing to allow an OAuth App to
+>   create or update workflow ... without `workflow` scope"*, add it once with:
+>   ```bash
+>   gh auth refresh -h github.com -s workflow
+>   ```
 
 ## Development notes
 
