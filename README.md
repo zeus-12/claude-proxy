@@ -145,6 +145,28 @@ cloudflared tunnel --url http://127.0.0.1:8787
   which counts against your subscription's usage limits. Short replies still cost
   that floor.
 
+## Releasing (maintainers)
+
+Releases are tag-driven. One command from a clean `main` cuts a release:
+
+```bash
+./Scripts/release.sh 0.1.1
+```
+
+It verifies you're on `main` with a clean tree, pushes `main`, then creates and
+pushes the `v0.1.1` tag. Pushing that tag triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds a
+universal `Claude Proxy.app` on a macOS runner and publishes it as a GitHub
+Release with the zip attached. The **git tag is the single source of truth** for
+the version.
+
+To build a test artifact without publishing, run the workflow manually from the
+**Actions** tab (it builds and uploads an artifact but creates no Release).
+
+> First-time setup: the workflow file must already be on `main` before the first
+> tag, and **Settings → Actions → General → Workflow permissions** must be set to
+> **Read and write** so the release can be created.
+
 ## Development notes
 
 - Pure SwiftUI / AppKit / Network / Foundation — no external dependencies.

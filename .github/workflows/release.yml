@@ -1,11 +1,12 @@
 name: Release
 
-# Builds a universal "Claude Proxy.app", zips it, and publishes it as a GitHub
-# Release asset. The build artifact lives only in the Release — never in git.
+# Tag-driven releases.
+#   - Push a tag `vX.Y.Z`  -> build + PUBLISH a GitHub Release with the app zip.
+#   - Run manually (dispatch) -> build a test artifact only, does NOT publish.
 #
-# Two ways to trigger:
-#   1. Push a version tag:   git tag v1.0.0 && git push origin v1.0.0
-#   2. Run manually:         Actions tab -> Release -> Run workflow (enter version)
+# No binaries are committed to the repo; the built app lives only on the Release.
+# The build artifact is universal (arm64 + x86_64) from a single macOS runner,
+# because Scripts/package-app.sh builds with `--arch arm64 --arch x86_64`.
 
 on:
   push:
@@ -14,19 +15,23 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release, e.g. 1.0.0"
+        description: "Version for a test build (built but NOT published), e.g. 0.1.0"
         required: true
 
 permissions:
-  contents: write # needed to create the Release and upload assets
+  contents: write # lets the auto-provided GITHUB_TOKEN create the Release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  release:
+  build:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve version & tag
+      - name: Resolve version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             V="${{ github.event.inputs.version }}"
@@ -34,7 +39,6 @@ jobs:
             V="${GITHUB_REF_NAME#v}"
           fi
           echo "VERSION=$V" >> "$GITHUB_ENV"
-          echo "TAG=v$V"     >> "$GITHUB_ENV"
 
       - name: Toolchain
         run: swift --version
@@ -42,14 +46,38 @@ jobs:
       - name: Build & package
         run: ./Scripts/package-app.sh "$VERSION"
 
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-proxy-app
+          path: dist/Claude-Proxy-*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only real tag pushes publish. Manual dispatch test builds stop after `build`.
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse to publish a tag that isn't on main
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/Claude-Proxy-*.zip --clobber
-          else
-            gh release create "$TAG" dist/Claude-Proxy-*.zip \
-              --title "Claude Proxy $VERSION" \
-              --generate-notes
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            echo "::error::Tag $GITHUB_REF_NAME does not point at a commit on main - refusing to publish."
+            exit 1
           fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/Claude-Proxy-*.zip
+          generate_release_notes: true
