@@ -42,7 +42,23 @@ your app  ──HTTP──▶  claude-proxy (localhost:8787)  ──▶  claude 
   (`claude` must be on your login shell's `PATH`)
 - Swift 6 toolchain (Xcode command-line tools) to build
 
-## Build & run
+## Install
+
+Grab the latest `Claude-Proxy-<version>.zip` from the
+[Releases](https://github.com/zeus-12/claude-proxy/releases) page, unzip it, and
+move **Claude Proxy.app** to `/Applications`.
+
+The app isn't code-signed (that needs a paid Apple Developer account), so the
+first time you open it macOS Gatekeeper will complain. Either **right-click the
+app → Open** and confirm, or clear the quarantine flag once:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Claude Proxy.app"
+```
+
+Then launch it — it lives in the menu bar, not the Dock.
+
+## Build & run (from source)
 
 ```bash
 swift build -c release

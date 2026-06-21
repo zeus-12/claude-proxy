@@ -1,0 +1,55 @@
+name: Release
+
+# Builds a universal "Claude Proxy.app", zips it, and publishes it as a GitHub
+# Release asset. The build artifact lives only in the Release — never in git.
+#
+# Two ways to trigger:
+#   1. Push a version tag:   git tag v1.0.0 && git push origin v1.0.0
+#   2. Run manually:         Actions tab -> Release -> Run workflow (enter version)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.0"
+        required: true
+
+permissions:
+  contents: write # needed to create the Release and upload assets
+
+jobs:
+  release:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version & tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "TAG=v$V"     >> "$GITHUB_ENV"
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build & package
+        run: ./Scripts/package-app.sh "$VERSION"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/Claude-Proxy-*.zip --clobber
+          else
+            gh release create "$TAG" dist/Claude-Proxy-*.zip \
+              --title "Claude Proxy $VERSION" \
+              --generate-notes
+          fi

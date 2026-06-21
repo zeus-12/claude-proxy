@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7B6CF6"/>
+      <stop offset="1" stop-color="#4B3FD0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- macOS-style rounded square -->
+  <rect x="84" y="84" width="856" height="856" rx="192" ry="192" fill="url(#bg)"/>
+
+  <!-- one source fanning out to many endpoints -->
+  <g stroke="#F6F6F8" stroke-width="24" stroke-linecap="round" fill="none">
+    <line x1="378" y1="512" x2="672" y2="360"/>
+    <line x1="378" y1="512" x2="706" y2="512"/>
+    <line x1="378" y1="512" x2="672" y2="664"/>
+  </g>
+  <g fill="#F6F6F8">
+    <circle cx="378" cy="512" r="78"/>
+    <circle cx="672" cy="360" r="44"/>
+    <circle cx="706" cy="512" r="44"/>
+    <circle cx="672" cy="664" r="44"/>
+  </g>
+</svg>

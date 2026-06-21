@@ -3,6 +3,9 @@
 .swiftpm/
 Package.resolved
 
+# Packaging output (built .app + zip live only in GitHub Releases, never in git)
+dist/
+
 # Stray compiler artifacts (sometimes dropped in the repo root by a failed link)
 *.o
 *.d
