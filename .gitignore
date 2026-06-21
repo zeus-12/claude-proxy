@@ -3,6 +3,12 @@
 .swiftpm/
 Package.resolved
 
+# Stray compiler artifacts (sometimes dropped in the repo root by a failed link)
+*.o
+*.d
+*.swiftdeps
+*.swiftdeps~
+
 # macOS
 .DS_Store
 
