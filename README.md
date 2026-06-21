@@ -44,19 +44,29 @@ your app  ──HTTP──▶  claude-proxy (localhost:8787)  ──▶  claude 
 
 ## Install
 
-Grab the latest `Claude-Proxy-<version>.zip` from the
-[Releases](https://github.com/zeus-12/claude-proxy/releases) page, unzip it, and
-move **Claude Proxy.app** to `/Applications`.
+1. Download the latest `Claude-Proxy-<version>.zip` from the
+   [Releases](https://github.com/zeus-12/claude-proxy/releases) page.
+2. Unzip it and move **Claude Proxy.app** to `/Applications`.
+3. Open it the first time using **one of the two workarounds below**.
+4. It launches into the menu bar (no Dock icon) — click the icon to use it.
 
-The app isn't code-signed (that needs a paid Apple Developer account), so the
-first time you open it macOS Gatekeeper will complain. Either **right-click the
-app → Open** and confirm, or clear the quarantine flag once:
+### "Claude Proxy can't be opened" — why, and how to get past it
 
-```bash
-xattr -dr com.apple.quarantine "/Applications/Claude Proxy.app"
-```
+macOS tags anything downloaded from the internet with a *quarantine* flag, and
+**Gatekeeper refuses to open apps that aren't signed and notarized by a paid
+Apple Developer account** ($99/yr — which this app doesn't have). So on first
+launch you'll see a warning like *"Apple could not verify Claude Proxy is free of
+malware."* The app is fine; it just isn't notarized. Get past it either way:
 
-Then launch it — it lives in the menu bar, not the Dock.
+- **Right-click** (or Control-click) the app in Finder → **Open** → **Open** again
+  in the dialog. macOS remembers this and won't ask again.
+- **Or** clear the quarantine flag from the terminal once:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/Claude Proxy.app"
+  ```
+
+You only have to do this once, right after installing (or after each update).
 
 ## Build & run (from source)
 
