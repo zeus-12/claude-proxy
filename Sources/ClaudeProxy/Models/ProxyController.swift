@@ -28,10 +28,8 @@ final class ProxyController: ObservableObject {
     // MARK: - CRUD
 
     func addInstance() {
-        let defaults = UserDefaults.standard
-        let model = defaults.string(forKey: DefaultsKey.defaultModel) ?? "sonnet"
         let port = nextFreePort()
-        let instance = ProxyInstance(name: "Instance \(instances.count + 1)", model: model, port: port)
+        let instance = ProxyInstance(name: "Instance \(instances.count + 1)", model: "sonnet", port: port)
         instances.append(instance)
         save()
     }
@@ -107,8 +105,7 @@ final class ProxyController: ObservableObject {
 
     private func nextFreePort() -> Int {
         let used = Set(instances.map(\.port))
-        let base = UserDefaults.standard.object(forKey: DefaultsKey.basePort) as? Int ?? 8787
-        var port = max(1, base)
+        var port = 8787
         while used.contains(port) { port += 1 }
         return port
     }

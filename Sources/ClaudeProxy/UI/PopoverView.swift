@@ -53,13 +53,6 @@ struct PopoverView: View {
             Text("Claude Proxy").font(.headline)
             Spacer()
             Button {
-                SettingsWindowController.show()
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.borderless)
-            .help("Settings")
-            Button {
                 controller.addInstance()
             } label: {
                 Image(systemName: "plus")
