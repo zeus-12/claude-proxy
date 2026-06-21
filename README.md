@@ -2,16 +2,23 @@
 
 **One subscription. AI in every app.**
 
+A simple menu-bar-only macOS app that exposes an OpenAI-compatible endpoint to
+your Claude Code subscription.
+
+<p align="center">
+  <img src="docs/menubar.png" alt="claude-proxy menu bar app" width="380">
+</p>
+
 `claude-proxy` turns your Claude Code subscription into a local, OpenAI-compatible
 API. You run it once, and it gives you a URL like `http://127.0.0.1:8787/v1`.
 Paste that URL into any app that lets you point at a custom OpenAI endpoint — and
 that app now has AI, powered by the subscription you already pay for.
 
-No separate per-app AI plan. No extra API bill. The apps you already use just
+No separate per-app AI plan. No extra tokens to buy. The apps you already use just
 start talking to the model through your one subscription.
 
-It's a tiny macOS menu-bar app. Add as many endpoints as you want — one per port,
-each backed by whatever Claude model you choose.
+Add as many endpoints as you want — one per port, each backed by whatever Claude
+model you choose.
 
 ---
 
