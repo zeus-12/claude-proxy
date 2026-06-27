@@ -42,6 +42,8 @@ struct InstanceEditView: View {
                 Toggle("Start automatically at launch", isOn: $draft.autoStart)
             }
 
+            endpoints
+
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel)
@@ -52,6 +54,41 @@ struct InstanceEditView: View {
         }
         .padding(20)
         .frame(width: 340)
+    }
+
+    /// Shows the OpenAI-compatible endpoints this instance serves and which one
+    /// supports streaming. Streaming is the standard OpenAI mechanism — set
+    /// `"stream": true` on a chat request and the server replies with an SSE
+    /// `text/event-stream` of `chat.completion.chunk` deltas.
+    private var endpoints: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Endpoints").font(.caption).foregroundStyle(.secondary)
+            endpointRow("POST", "/v1/chat/completions", streaming: true)
+            endpointRow("GET", "/v1/models", streaming: false)
+            endpointRow("POST", "/v1/audio/transcriptions", streaming: false)
+            Text("Streaming: send `\"stream\": true` to receive SSE deltas.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func endpointRow(_ method: String, _ path: String, streaming: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(method)
+                .font(.system(.caption2, design: .monospaced)).bold()
+                .frame(width: 36, alignment: .leading)
+            Text(path).font(.system(.caption2, design: .monospaced))
+            if streaming {
+                Label("stream", systemImage: "dot.radiowaves.left.and.right")
+                    .font(.caption2)
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(.green)
+            }
+            Spacer()
+        }
     }
 
     private var isValid: Bool {
