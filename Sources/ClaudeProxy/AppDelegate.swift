@@ -7,7 +7,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private let controller = ProxyController()
     private let dictation = DictationController()
-    private let voice = VoiceController()
     private var monitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -29,15 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootView: PopoverView()
                 .environmentObject(controller)
                 .environmentObject(dictation)
-                .environmentObject(voice)
         )
-
-        voice.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         controller.stopAll()
-        voice.stop()
     }
 
     /// A menu-bar (`.accessory`) app shows no menu bar, but it still needs a main

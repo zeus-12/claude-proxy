@@ -65,7 +65,6 @@ struct InstanceEditView: View {
             Text("Endpoints").font(.caption).foregroundStyle(.secondary)
             endpointRow("POST", "/v1/chat/completions", streaming: true)
             endpointRow("GET", "/v1/models", streaming: false)
-            endpointRow("POST", "/v1/audio/transcriptions", streaming: false)
             Text("Streaming: send `\"stream\": true` to receive SSE deltas.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
