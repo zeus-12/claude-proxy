@@ -35,6 +35,24 @@ your app  ──HTTP──▶  claude-proxy (localhost:8787)  ──▶  claude 
         ◀──OpenAI JSON / SSE──
 ```
 
+## Dictation — voice endpoint for TypeWhisper
+
+The app also hosts a small **local WebSocket endpoint** (`ws://127.0.0.1:8765`)
+that transcribes speech through your Claude subscription. It's consumed by a
+companion **[TypeWhisper](https://github.com/TypeWhisper/typewhisper-mac) plugin**
+— **[claude-subscription-typewhisper-plugin](https://github.com/zeus-12/claude-subscription-typewhisper-plugin)**
+— so you dictate inside TypeWhisper with its normal hotkey/UX, and this app owns
+all the Claude-side logic (reading the subscription token and speaking Claude's
+speech-to-text protocol). The plugin just streams mic audio here and gets
+transcripts back, so it stays thin and holds no credentials.
+
+Because this app owns the endpoint, **dictation only works while this app is
+running** — the plugin connects to it. The popover shows the endpoint status.
+
+> Note: this uses Claude's raw speech-to-text, which today is rougher than
+> Whisper-based dictation. It's handy and free with the subscription, but set
+> expectations accordingly. See *Honest caveats*.
+
 ## Requirements
 
 - macOS 14 or later

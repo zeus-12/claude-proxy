@@ -5,7 +5,6 @@ import Network
 /// closes. One connection = one request (`Connection: close`).
 final class HTTPConnection {
     private let conn: NWConnection
-    private let instance: ProxyInstance
     private let queue: DispatchQueue
     private var buffer = Data()
     /// Keeps this object alive for the duration of the connection. The
@@ -14,9 +13,8 @@ final class HTTPConnection {
     /// returns. Cleared in `close()`.
     private var selfRetain: HTTPConnection?
 
-    init(conn: NWConnection, instance: ProxyInstance, queue: DispatchQueue) {
+    init(conn: NWConnection, queue: DispatchQueue) {
         self.conn = conn
-        self.instance = instance
         self.queue = queue
     }
 
@@ -68,46 +66,138 @@ final class HTTPConnection {
         case ("POST", "/v1/chat/completions"):
             handleChat(request)
         case ("GET", "/"), ("GET", "/health"):
-            writeJSON(status: 200, object: ["status": "ok", "instance": instance.name, "model": instance.model])
+            writeJSON(status: 200, object: ["status": "ok", "models": ChatModel.allowedIDs])
         default:
             writeError(status: 404, message: "Not found: \(request.method) \(request.path)")
         }
     }
 
     private func handleModels() {
-        let response = ModelListResponse(data: [
-            ModelEntry(id: instance.advertisedModelID, created: OpenAIIDs.now)
-        ])
+        let response = ModelListResponse(data: ChatModel.allowedIDs.map {
+            ModelEntry(id: $0, created: OpenAIIDs.now)
+        })
         writeEncodable(status: 200, response)
     }
 
     private func handleChat(_ request: HTTPRequest) {
-        guard let body = request.body,
-              let decoded = try? JSONDecoder().decode(ChatCompletionRequest.self, from: body) else {
-            writeError(status: 400, message: "Invalid request body")
+        guard let body = request.body else {
+            writeError(status: 400, message: "Missing request body")
             return
         }
-        guard !decoded.messages.isEmpty else {
-            writeError(status: 400, message: "`messages` must not be empty")
+        let decoded: ChatCompletionRequest
+        do {
+            decoded = try JSONDecoder().decode(ChatCompletionRequest.self, from: body)
+            try decoded.validate()
+        } catch let e as ProxyRequestError {
+            writeError(status: 400, message: e.message)
+            return
+        } catch let e as DecodingError {
+            writeError(status: 400, message: "Invalid request body: \(Self.describe(e))")
+            return
+        } catch {
+            writeError(status: 400, message: "Invalid request body: \(error.localizedDescription)")
             return
         }
 
         let wantsStream = decoded.stream ?? false
-        let model = instance.model
+        // `validate()` has already guaranteed `model` is present and allowed.
+        let model = decoded.model ?? ChatModel.sonnet.rawValue
+
+        // Tool calling: the model emits the tool call as JSON in its full output,
+        // which we must inspect before responding — so we buffer rather than
+        // stream-through. Only engaged when tools are present and not disabled.
+        let toolsActive: Bool = {
+            guard let tools = decoded.tools, !tools.isEmpty else { return false }
+            if case .none? = decoded.tool_choice { return false }
+            return true
+        }()
 
         let result: ClaudeBackend.StreamResult
         do {
-            result = try ClaudeBackend.stream(model: model, messages: decoded.messages)
+            result = try ClaudeBackend.stream(model: model, messages: decoded.messages,
+                                              tools: decoded.tools, toolChoice: decoded.tool_choice)
         } catch {
             writeError(status: 502, message: error.localizedDescription)
             return
         }
 
-        if wantsStream {
+        if toolsActive {
+            respondToolAware(result, model: model, stream: wantsStream)
+        } else if wantsStream {
             streamChat(result, model: model)
         } else {
             collectChat(result, model: model)
         }
+    }
+
+    /// Buffer the full output, then decide whether it's a tool call or plain text
+    /// and respond in the requested shape (JSON or SSE).
+    private func respondToolAware(_ result: ClaudeBackend.StreamResult, model: String, stream: Bool) {
+        Task {
+            var text = ""
+            do {
+                for try await delta in result.deltas { text += delta }
+            } catch {
+                // Nothing has been written yet, so a normal error response is fine
+                // even if the client asked to stream.
+                writeError(status: 502, message: error.localizedDescription)
+                return
+            }
+            let calls = ClaudeBackend.parseToolCalls(text)
+            if stream {
+                streamToolAware(model: model, calls: calls, text: text)
+            } else {
+                let message: ChatCompletionResponse.Message
+                let finish: String
+                if let calls {
+                    message = .init(content: nil, tool_calls: calls)
+                    finish = "tool_calls"
+                } else {
+                    message = .init(content: text, tool_calls: nil)
+                    finish = "stop"
+                }
+                let response = ChatCompletionResponse(
+                    id: OpenAIIDs.chatID(), created: OpenAIIDs.now, model: model,
+                    choices: [.init(message: message, finish_reason: finish)]
+                )
+                writeEncodable(status: 200, response)
+            }
+        }
+    }
+
+    /// Emit a buffered tool-aware result as SSE deltas (one full tool-call delta
+    /// per call, or the text as a single content delta), then `[DONE]`.
+    private func streamToolAware(model: String, calls: [ToolCall]?, text: String) {
+        let id = OpenAIIDs.chatID()
+        let created = OpenAIIDs.now
+        writeRaw(status: 200, headers: sseHeaders, body: Data(), keepOpen: true)
+
+        func send(_ delta: ChatCompletionChunk.Delta, finish: String?) {
+            let chunk = ChatCompletionChunk(
+                id: id, created: created, model: model,
+                choices: [.init(delta: delta, finish_reason: finish)]
+            )
+            if let data = try? JSONEncoder().encode(chunk) {
+                sendSSE(Data("data: ".utf8) + data + Data("\n\n".utf8))
+            }
+        }
+
+        send(.init(role: "assistant"), finish: nil)
+        if let calls {
+            let deltas = calls.enumerated().map { i, c in
+                ChatCompletionChunk.ToolCallDelta(
+                    index: i, id: c.id,
+                    function: .init(name: c.function.name, arguments: c.function.arguments))
+            }
+            send(.init(tool_calls: deltas), finish: nil)
+            send(.init(), finish: "tool_calls")
+        } else {
+            send(.init(content: text), finish: nil)
+            send(.init(), finish: "stop")
+        }
+        conn.send(content: Data("data: [DONE]\n\n".utf8), completion: .contentProcessed { [weak self] _ in
+            self?.close()
+        })
     }
 
     // MARK: - Streaming (SSE)
@@ -166,9 +256,30 @@ final class HTTPConnection {
             }
             let response = ChatCompletionResponse(
                 id: OpenAIIDs.chatID(), created: OpenAIIDs.now, model: model,
-                choices: [.init(message: .init(content: text), finish_reason: "stop")]
+                choices: [.init(message: .init(content: text, tool_calls: nil), finish_reason: "stop")]
             )
             writeEncodable(status: 200, response)
+        }
+    }
+
+    /// Human-readable summary of a JSON decoding failure, including the key path,
+    /// so clients get an actionable 400 instead of "Invalid request body".
+    private static func describe(_ error: DecodingError) -> String {
+        func path(_ ctx: DecodingError.Context) -> String {
+            ctx.codingPath.map(\.stringValue).joined(separator: ".")
+        }
+        switch error {
+        case .keyNotFound(let key, let ctx):
+            let p = path(ctx)
+            return "missing required field `\(key.stringValue)`\(p.isEmpty ? "" : " at \(p)")"
+        case .typeMismatch(_, let ctx), .valueNotFound(_, let ctx):
+            let p = path(ctx)
+            return "\(ctx.debugDescription)\(p.isEmpty ? "" : " at \(p)")"
+        case .dataCorrupted(let ctx):
+            let p = path(ctx)
+            return "\(ctx.debugDescription)\(p.isEmpty ? "" : " at \(p)")"
+        @unknown default:
+            return error.localizedDescription
         }
     }
 

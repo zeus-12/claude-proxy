@@ -1,29 +1,29 @@
 import Foundation
 import Network
 
-/// One loopback HTTP server for a single ProxyInstance. Hand-rolls a minimal
+/// One loopback HTTP server for the Chat endpoint. Hand-rolls a minimal
 /// HTTP/1.1 request reader and writer — we only need request/response with
 /// `Connection: close` semantics (no keep-alive, no pipelining), which keeps
 /// the surface small and predictable. SSE streaming works fine over a
 /// close-delimited connection.
 final class ProxyServer {
 
-    let instance: ProxyInstance
+    let endpoint: ChatEndpoint
     private var listener: NWListener?
     private let queue: DispatchQueue
     /// Called on the main queue with every real listener state change. The UI
     /// derives status from this only — never from "we asked it to start".
     private let onStatus: (InstanceStatus) -> Void
 
-    init(instance: ProxyInstance, onStatus: @escaping (InstanceStatus) -> Void) {
-        self.instance = instance
+    init(endpoint: ChatEndpoint, onStatus: @escaping (InstanceStatus) -> Void) {
+        self.endpoint = endpoint
         self.onStatus = onStatus
-        self.queue = DispatchQueue(label: "proxy.server.\(instance.port)")
+        self.queue = DispatchQueue(label: "proxy.server.\(endpoint.port)")
     }
 
     func start() {
-        guard let port = NWEndpoint.Port(rawValue: UInt16(instance.port)) else {
-            report(.failed("Invalid port \(instance.port)"))
+        guard let port = NWEndpoint.Port(rawValue: UInt16(endpoint.port)) else {
+            report(.failed("Invalid port \(endpoint.port)"))
             return
         }
 
@@ -78,7 +78,7 @@ final class ProxyServer {
     // MARK: - Connection handling
 
     private func accept(_ conn: NWConnection) {
-        let handler = HTTPConnection(conn: conn, instance: instance, queue: queue)
+        let handler = HTTPConnection(conn: conn, queue: queue)
         handler.start()
     }
 }

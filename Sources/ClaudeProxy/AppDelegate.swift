@@ -5,8 +5,8 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
-    private let controller = ProxyController()
-    private let dictation = DictationController()
+    private let chat = ChatController()
+    private let voice = VoiceController()
     private var monitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -14,25 +14,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "arrow.left.arrow.right",
-                                accessibilityDescription: "Claude Proxy")
-            image?.isTemplate = true   // adapts to light/dark menu bar
-            button.image = image
+            button.image = Self.menuBarIcon()
             button.action = #selector(togglePopover)
             button.target = self
         }
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 360, height: 460)
+        popover.contentSize = NSSize(width: 340, height: 388)
         popover.contentViewController = NSHostingController(
             rootView: PopoverView()
-                .environmentObject(controller)
-                .environmentObject(dictation)
+                .environmentObject(chat)
+                .environmentObject(voice)
         )
+        // Both endpoints auto-start (if configured) inside their controllers'
+        // init — nothing to kick off here.
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        controller.stopAll()
+        chat.stop()
+        voice.stop()
     }
 
     /// A menu-bar (`.accessory`) app shows no menu bar, but it still needs a main
@@ -65,6 +65,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editItem.submenu = editMenu
 
         NSApp.mainMenu = mainMenu
+    }
+
+    /// The menu-bar glyph: the same Lucide `arrow-left-right` motif as the app
+    /// icon, drawn as a template image so macOS tints it for light/dark menus.
+    private static func menuBarIcon() -> NSImage {
+        let size: CGFloat = 18
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
+            let s = size / 24.0   // Lucide's 24-unit viewBox → 18pt
+            func p(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
+                NSPoint(x: x * s, y: (24 - y) * s)   // flip: SVG is y-down
+            }
+            let path = NSBezierPath()
+            path.lineWidth = 2 * s
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            // Top arrow (points left) + its line.
+            path.move(to: p(8, 3));  path.line(to: p(4, 7));  path.line(to: p(8, 11))
+            path.move(to: p(4, 7));  path.line(to: p(20, 7))
+            // Bottom arrow (points right) + its line.
+            path.move(to: p(16, 21)); path.line(to: p(20, 17)); path.line(to: p(16, 13))
+            path.move(to: p(20, 17)); path.line(to: p(4, 17))
+            NSColor.black.setStroke()
+            path.stroke()
+            return true
+        }
+        image.isTemplate = true   // adapts to light/dark menu bar
+        image.accessibilityDescription = "Claude Proxy"
+        return image
     }
 
     @objc private func togglePopover() {

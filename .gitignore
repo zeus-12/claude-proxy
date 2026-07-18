@@ -19,3 +19,8 @@ dist/
 *.swp
 .vscode/
 .idea/
+
+# Local scratch + agent workflow notes (kept out of the public repo)
+/scratchpad/
+/CLAUDE.md
+
