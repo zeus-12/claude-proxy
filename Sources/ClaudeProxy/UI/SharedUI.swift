@@ -17,17 +17,19 @@ final class CopyFlash {
         copied = true
         reset?.cancel()
         reset = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.6))
+            try? await Task.sleep(for: .seconds(0.9))
             guard !Task.isCancelled else { return }
             self?.copied = false
         }
     }
 }
 
-/// The document/checkmark pair, morphing between the two. Inherits its colour
-/// from the surrounding button so neither state is tinted.
+/// The document/checkmark pair. `blurReplace` is scale + opacity + blur, on a
+/// bounce-free spring — the icon changes without moving anything around it. The
+/// fixed frame is what keeps neighbouring text from shifting on the swap.
 private struct CopyFlashIcon: View {
     let copied: Bool
+    let size: CGFloat
 
     var body: some View {
         ZStack {
@@ -37,10 +39,10 @@ private struct CopyFlashIcon: View {
                 Image(systemName: "doc.on.doc").transition(.blurReplace)
             }
         }
+        .frame(width: size, height: size)
+        .animation(.spring(duration: 0.2, bounce: 0), value: copied)
     }
 }
-
-private let copyFlashSpring = Animation.spring(response: 0.34, dampingFraction: 0.6)
 
 /// A borderless button that copies a string to the pasteboard.
 struct CopyButton: View {
@@ -53,25 +55,16 @@ struct CopyButton: View {
         Button {
             flash.copy(value)
         } label: {
-            CopyFlashIcon(copied: flash.copied)
+            CopyFlashIcon(copied: flash.copied, size: 13)
                 .font(.caption)
-                .frame(width: 14, height: 14)
-                .background {
-                    Circle()
-                        .fill(Color.primary.opacity(0.12))
-                        .frame(width: 21, height: 21)
-                        .scaleEffect(flash.copied ? 1 : 0.3)
-                        .opacity(flash.copied ? 1 : 0)
-                }
-                .scaleEffect(flash.copied ? 1.1 : 1)
         }
         .buttonStyle(.borderless)
-        .animation(copyFlashSpring, value: flash.copied)
         .help(flash.copied ? "Copied" : "Copy")
     }
 }
 
 /// A labelled button that copies a block of documentation to the pasteboard.
+/// The title never changes — only the icon — so the button keeps its width.
 struct CopyDocsButton: View {
     let title: String
     /// Built lazily: the docs are only serialized when the user actually clicks.
@@ -84,12 +77,10 @@ struct CopyDocsButton: View {
             flash.copy(markdown())
         } label: {
             HStack(spacing: 6) {
-                CopyFlashIcon(copied: flash.copied)
-                Text(flash.copied ? "Copied" : title)
-                    .contentTransition(.opacity)
+                CopyFlashIcon(copied: flash.copied, size: 15)
+                Text(title)
             }
         }
-        .animation(copyFlashSpring, value: flash.copied)
         .help("Copy this reference as Markdown — paste it into an LLM or your notes")
     }
 }
