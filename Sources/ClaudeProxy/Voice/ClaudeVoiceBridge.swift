@@ -19,12 +19,24 @@ final class ClaudeVoiceBridge {
     // transcript after awaiting that task, so no locking is needed.
     private var accumulator = TranscriptAccumulator()
 
-    /// Called with the progressive transcript as it grows (background thread).
+    /// Called with the progressive cumulative transcript as it grows
+    /// (background thread). Used by the legacy protocol, which has no notion of
+    /// segments.
     var onInterim: ((String) -> Void)?
+
+    /// Called with each per-segment event (background thread). Used by the
+    /// Deepgram protocol, which must distinguish interim from final results.
+    /// Fires alongside `onInterim`, not instead of it.
+    var onEvent: ((TranscriptEvent) -> Void)?
 
     /// Reads the Keychain token and prepares the Claude WebSocket. Throws if the
     /// token can't be read (surfaced to the plugin as a protocol error).
-    init() throws {
+    /// Identifies this bridge in the voice trace, so upstream messages can be
+    /// matched to the client connection that caused them.
+    private let tag: String
+
+    init(tag: String = "----") throws {
+        self.tag = tag
         let token = try ClaudeCredentials.accessToken()
 
         var comps = URLComponents(string: "wss://api.anthropic.com/api/ws/speech_to_text/voice_stream")!
@@ -81,14 +93,21 @@ final class ClaudeVoiceBridge {
     private func receiveLoop() async {
         while true {
             let message: URLSessionWebSocketTask.Message
-            do { message = try await ws.receive() } catch { break }
+            do { message = try await ws.receive() } catch {
+                VoiceLog.write(tag, "upstream closed: \(error.localizedDescription)")
+                break
+            }
+            if case .string(let text) = message {
+                VoiceLog.write(tag, "upstream \(text)")
+            }
             guard case .string(let text) = message,
                   let data = text.data(using: .utf8),
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 continue
             }
-            if let interim = accumulator.handle(obj) {
-                onInterim?(interim)
+            if let event = accumulator.handle(obj) {
+                onEvent?(event)
+                onInterim?(accumulator.interim)
             }
         }
     }

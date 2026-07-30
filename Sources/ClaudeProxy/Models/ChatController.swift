@@ -12,6 +12,17 @@ final class ChatController: ObservableObject {
     private var server: ProxyServer?
     private let storeURL: URL
 
+    /// Whether the endpoint is *meant* to be up. Distinct from `status`, which
+    /// is the real listener state: a failed bind reports `.failed` (and so
+    /// `isActive == false`), and a later port change has to retry rather than
+    /// conclude the user had deliberately stopped it.
+    private var wantsRunning = false
+
+    /// Invalidates callbacks from a server we've discarded. A cancelled listener
+    /// reports asynchronously, which would otherwise land after a replacement
+    /// has already reported ready and wipe its status.
+    private var generation = 0
+
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let dir = support.appendingPathComponent("ClaudeProxy", isDirectory: true)
@@ -32,9 +43,15 @@ final class ChatController: ObservableObject {
     }
 
     func start() {
-        guard server == nil else { return }
+        wantsRunning = true
+        // Not `guard server == nil`: a server that failed to bind is still a
+        // live object, and refusing to replace it made every retry a no-op
+        // until the app was relaunched.
+        teardown()
+        let token = generation
         let server = ProxyServer(endpoint: config) { [weak self] status in
-            self?.status = status
+            guard let self, self.generation == token else { return }
+            self.status = status
         }
         self.server = server
         status = .starting
@@ -42,18 +59,28 @@ final class ChatController: ObservableObject {
     }
 
     func stop() {
+        wantsRunning = false
+        teardown()
+    }
+
+    /// Releases the current server without changing intent, clearing any failure
+    /// so a stale error can't outlive the configuration that caused it.
+    private func teardown() {
+        generation &+= 1
         server?.stop()
         server = nil
         status = .stopped
     }
 
-    /// Apply an edited config. Restarts the server if it was running so the new
-    /// port takes effect.
+    /// Apply an edited config, restarting the server if the endpoint is meant to
+    /// be up so the new port takes effect. Keyed on intent rather than on
+    /// `status.isActive`, so changing the port also retries an endpoint whose
+    /// previous port was already taken.
     func apply(_ newConfig: ChatEndpoint) {
-        let wasRunning = status.isActive
-        if wasRunning { stop() }
+        let shouldRun = wantsRunning
+        teardown()
         config = newConfig
-        if wasRunning { start() }
+        if shouldRun { start() }
     }
 
     // MARK: - Persistence

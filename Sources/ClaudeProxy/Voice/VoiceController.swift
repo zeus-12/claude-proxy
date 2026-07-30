@@ -19,6 +19,17 @@ final class VoiceController: ObservableObject {
     private var server: VoiceServer?
     private static let store = "voiceEndpoint"
 
+    /// Whether the endpoint is *meant* to be up. Distinct from `running`, which
+    /// is the real listener state: a failed bind leaves the endpoint wanted but
+    /// not running, and a later port change has to retry rather than conclude
+    /// the user had deliberately stopped it.
+    private var wantsRunning = false
+
+    /// Invalidates callbacks from a server we've discarded. A cancelled listener
+    /// reports `.cancelled` asynchronously, which would otherwise land after a
+    /// replacement has already reported ready and wipe its status.
+    private var generation = 0
+
     init() {
         config = Self.load()
         save()
@@ -40,29 +51,45 @@ final class VoiceController: ObservableObject {
     }
 
     func start() {
-        guard server == nil else { return }
+        wantsRunning = true
+        // Not `guard server == nil`: a server that failed to bind is still a
+        // live object, and refusing to replace it made every retry a no-op
+        // until the app was relaunched.
+        teardown()
+        let token = generation
         let server = VoiceServer(port: UInt16(config.port)) { [weak self] running, error in
-            self?.running = running
-            self?.error = error
+            guard let self, self.generation == token else { return }
+            self.running = running
+            self.error = error
         }
         self.server = server
         server.start()
     }
 
     func stop() {
+        wantsRunning = false
+        teardown()
+    }
+
+    /// Releases the current server without changing intent, clearing any error
+    /// so a stale failure can't outlive the configuration that caused it.
+    private func teardown() {
+        generation &+= 1
         server?.stop()
         server = nil
         running = false
         error = nil
     }
 
-    /// Apply an edited config, restarting the server if it was running so the new
-    /// port takes effect.
+    /// Apply an edited config, restarting the server if the endpoint is meant to
+    /// be up so the new port takes effect. Keyed on intent rather than on
+    /// `running`, so changing the port also retries an endpoint whose previous
+    /// port was already taken.
     func apply(_ newConfig: VoiceEndpoint) {
-        let wasRunning = running
-        if wasRunning { stop() }
+        let shouldRun = wantsRunning
+        teardown()
         config = newConfig
-        if wasRunning { start() }
+        if shouldRun { start() }
     }
 
     // MARK: - Persistence
