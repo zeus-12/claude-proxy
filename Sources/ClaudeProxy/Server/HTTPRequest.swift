@@ -34,16 +34,20 @@ struct HTTPRequest {
             headers[key] = value
         }
 
+        // Measure before copying: this runs on every arriving chunk, and copying
+        // a partial multi-megabyte body each time is quadratic.
         let bodyStart = headerEnd.upperBound
-        let available = data.subdata(in: bodyStart..<data.endIndex)
+        let availableCount = data.distance(from: bodyStart, to: data.endIndex)
 
         if let lengthString = headers["content-length"], let length = Int(lengthString), length > 0 {
             // Wait until the full body has arrived.
-            guard available.count >= length else { return nil }
+            guard availableCount >= length else { return nil }
+            let bodyEnd = data.index(bodyStart, offsetBy: length)
             return HTTPRequest(method: method, path: path, headers: headers,
-                               body: available.subdata(in: available.startIndex..<available.index(available.startIndex, offsetBy: length)))
+                               body: data.subdata(in: bodyStart..<bodyEnd))
         }
 
-        return HTTPRequest(method: method, path: path, headers: headers, body: available.isEmpty ? nil : available)
+        return HTTPRequest(method: method, path: path, headers: headers,
+                           body: availableCount == 0 ? nil : data.subdata(in: bodyStart..<data.endIndex))
     }
 }

@@ -67,6 +67,9 @@ enum APIDocs {
                 Entry(title: "Streaming",
                       detail: "Set `\"stream\": true` to receive Server-Sent Events — a stream of `chat.completion.chunk` deltas ending in `[DONE]`.",
                       code: "{ \"stream\": true }"),
+                Entry(title: "Images (vision)",
+                      detail: "Send a content-part array mixing `text` and `image_url` parts. Data URLs and http(s) URLs both work, as do the Anthropic (`image` + `source`) and Responses (`input_image`) spellings. Parts keep the order you sent them, so a label next to an image stays next to it. Media type must be png, jpeg, gif, or webp — an image that cannot be forwarded is a 400, never a silent drop.",
+                      code: "{ \"type\": \"image_url\", \"image_url\": { \"url\": \"data:image/png;base64,…\" } }"),
                 Entry(title: "Tools / function calling",
                       detail: "Send OpenAI `tools` (type `function`) and optional `tool_choice`. The model replies with `tool_calls` and `finish_reason: \"tool_calls\"`; feed results back as `role: \"tool\"` messages.",
                       code: "{ \"tools\": [...], \"tool_choice\": \"auto\" }"),
@@ -76,6 +79,12 @@ enum APIDocs {
                 Entry(title: "Health",
                       detail: "Liveness check. Returns `{ \"status\": \"ok\", \"models\": [...] }`.",
                       code: "GET \(rootURL(from: baseURL))/health"),
+                Entry(title: "Web fetch",
+                      detail: "Give the model a public URL and it will fetch the page and answer from it. This is the only tool it can actually run. Internal addresses — `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`, and the cloud metadata address — are refused, so the endpoint cannot be used to reach services that are only reachable from this machine.",
+                      code: "\"Summarise https://example.com\""),
+                Entry(title: "Isolation",
+                      detail: "Apart from web fetch the CLI runs as a text generator: no other built-in tools, no MCP servers, no skills or slash commands, no user settings or CLAUDE.md, and a scratch working directory. File reads are denied at the permission layer, so a request cannot pull files off this machine, and message text is forwarded to the model exactly as sent. `tools` you send are answered as JSON directives for you to execute — the model never runs them.",
+                      code: "web fetch only · no MCP · no skills · no file access"),
                 Entry(title: "Unsupported fields",
                       detail: "Accepted for compatibility and then ignored — the CLI backend exposes no controls for them. Do not rely on them having any effect.",
                       code: "temperature, top_p, max_tokens, n, stop, penalties, seed"),
@@ -99,6 +108,19 @@ enum APIDocs {
                     "model": "sonnet",
                     "stream": true,
                     "messages": [{"role": "user", "content": "Count to five."}]
+                  }'
+                ```
+                """),
+                Example(title: "curl (image)", body: """
+                ```bash
+                curl \(baseURL)/chat/completions \\
+                  -H "Content-Type: application/json" \\
+                  -d '{
+                    "model": "sonnet",
+                    "messages": [{"role": "user", "content": [
+                      {"type": "text", "text": "What is in this image?"},
+                      {"type": "image_url", "image_url": {"url": "data:image/png;base64,'"$(base64 -i shape.png)"'"}}
+                    ]}]
                   }'
                 ```
                 """),
@@ -136,7 +158,8 @@ enum APIDocs {
 
                 - `400` — `model` missing or not in (\(models)); `messages` empty; a \
                 message has an unknown `role`; a `role: "tool"` message is missing \
-                `tool_call_id`.
+                `tool_call_id`; an image has an unsupported media type, invalid \
+                base64, or a URL scheme other than `data:`/`http(s)`.
                 - `404` — wrong path. Remember `\(baseURL)` is a base URL; the \
                 request path is `\(baseURL)/chat/completions`.
                 - `502` — the `claude` CLI could not be found or failed to run.

@@ -1,8 +1,13 @@
 import AppKit
 
+// A `claude` child that exits while we are still writing its stdin would
+// otherwise take the whole app down with SIGPIPE. Writes report EPIPE instead.
+signal(SIGPIPE, SIG_IGN)
+
 // `--selftest`: run the framework-free unit checks and exit (no Xcode needed).
 if CommandLine.arguments.contains("--selftest") {
-    exit(VoiceSelfTest.run() ? 0 : 1)
+    let passed = [VoiceSelfTest.run(), ProxySelfTest.run()].allSatisfy { $0 }
+    exit(passed ? 0 : 1)
 }
 
 // `--voice-client <ws-url> <pcm-file>`: stream a raw linear16 PCM file to a
@@ -27,6 +32,19 @@ if let flag = CommandLine.arguments.firstIndex(of: "--voice-server") {
     let server = VoiceServer(port: port) { running, error in
         if let error { print("voice server error: \(error)") }
         else { print(running ? "voice server listening on \(port)" : "voice server stopped") }
+    }
+    server.start()
+    dispatchMain()
+}
+
+// `--chat-server [port]`: run only the Chat HTTP server, with no menu-bar UI —
+// the counterpart to `--voice-server`, for exercising the endpoint from a script.
+if let flag = CommandLine.arguments.firstIndex(of: "--chat-server") {
+    let port = CommandLine.arguments.count > flag + 1
+        ? Int(CommandLine.arguments[flag + 1]) ?? 8787
+        : 8787
+    let server = ProxyServer(endpoint: ChatEndpoint(port: port)) { status in
+        print("chat server: \(status)")
     }
     server.start()
     dispatchMain()

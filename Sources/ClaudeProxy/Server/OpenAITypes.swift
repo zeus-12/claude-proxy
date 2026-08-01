@@ -202,6 +202,7 @@ struct ChatCompletionRequest: Decodable {
 struct ChatMessage: Decodable {
     let role: String
     let content: String?        // nil when absent/null (e.g. assistant tool call)
+    let parts: [MessagePart]    // content in order, including images; empty when content is nil
     let name: String?           // optional; function name on some tool messages
     let toolCalls: [ToolCall]?  // assistant tool calls being replayed
     let toolCallId: String?     // links a role:"tool" result to its call
@@ -220,23 +221,159 @@ struct ChatMessage: Decodable {
         toolCallId = try c.decodeIfPresent(String.self, forKey: .toolCallId)
 
         // `content` is a string, an array of typed parts (vision/multimodal), or
-        // null/absent. We keep text, ignore non-text parts (CLI is text-only),
-        // and preserve nil so tool-call assistant turns encode correctly.
+        // null/absent. `content` keeps only the text — every existing text path
+        // reads it — while `parts` keeps text and images in their original order.
+        // nil is preserved so tool-call assistant turns encode correctly.
         if !c.contains(.content) || ((try? c.decodeNil(forKey: .content)) == true) {
             content = nil
+            parts = []
         } else if let text = try? c.decode(String.self, forKey: .content) {
             content = text
-        } else if let parts = try? c.decode([ContentPart].self, forKey: .content) {
-            content = parts.compactMap { $0.text }.joined()
+            parts = [.text(text)]
         } else {
-            throw ProxyRequestError("messages: `content` must be a string, an array of content parts, or null")
+            let decoded: [ContentPart]
+            do {
+                decoded = try c.decode([ContentPart].self, forKey: .content)
+            } catch let e as ProxyRequestError {
+                throw e
+            } catch {
+                throw ProxyRequestError("messages: `content` must be a string, an array of content parts, or null")
+            }
+            parts = decoded.map(\.part)
+            content = parts.compactMap { if case .text(let t) = $0 { return t } else { return nil } }.joined()
         }
     }
 
+    /// One content part in any of the spellings clients use: OpenAI
+    /// (`image_url`, object or bare string), Anthropic (`image` + `source`), and
+    /// Responses (`input_text` / `input_image`). An image we cannot forward is a
+    /// hard error — dropping it would return a confident answer about a picture
+    /// the model never saw.
     private struct ContentPart: Decodable {
-        let type: String?
-        let text: String?
+        let part: MessagePart
+
+        private enum CodingKeys: String, CodingKey { case type, text, image_url, source }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let type = try c.decodeIfPresent(String.self, forKey: .type) ?? "text"
+            switch type {
+            case "text", "input_text", "output_text":
+                part = .text(try c.decodeIfPresent(String.self, forKey: .text) ?? "")
+            case "image_url", "input_image":
+                guard let ref = try c.decodeIfPresent(ImageURL.self, forKey: .image_url) else {
+                    throw ProxyRequestError("content part of type \"\(type)\" is missing `image_url`")
+                }
+                part = .image(try ImageBlock(url: ref.url))
+            case "image":
+                guard let source = try c.decodeIfPresent(ImageSource.self, forKey: .source) else {
+                    throw ProxyRequestError("content part of type \"image\" is missing `source`")
+                }
+                part = .image(try source.imageBlock())
+            default:
+                throw ProxyRequestError("unsupported content part type \"\(type)\"; supported: text, input_text, image_url, input_image, image")
+            }
+        }
     }
+
+    /// `{"image_url": {"url": "…"}}` and the bare-string `{"image_url": "…"}`.
+    private struct ImageURL: Decodable {
+        let url: String
+
+        init(from decoder: Decoder) throws {
+            if let s = try? decoder.singleValueContainer().decode(String.self) {
+                url = s
+                return
+            }
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            url = try c.decode(String.self, forKey: .url)
+        }
+        private enum CodingKeys: String, CodingKey { case url }
+    }
+
+    private struct ImageSource: Decodable {
+        let type: String?
+        let media_type: String?
+        let data: String?
+        let url: String?
+
+        func imageBlock() throws -> ImageBlock {
+            switch type ?? "base64" {
+            case "base64":
+                guard let media_type, let data else {
+                    throw ProxyRequestError("image `source` of type \"base64\" requires `media_type` and `data`")
+                }
+                return try ImageBlock(mediaType: media_type, base64: data)
+            case "url":
+                guard let url else {
+                    throw ProxyRequestError("image `source` of type \"url\" requires `url`")
+                }
+                return try ImageBlock(url: url)
+            default:
+                throw ProxyRequestError("image `source.type` must be \"base64\" or \"url\" (got \"\(type ?? "")\")")
+            }
+        }
+    }
+}
+
+// MARK: - Images
+
+/// An image extracted from a multimodal content part, in the two forms the CLI
+/// accepts. Inline data is validated at decode time (see `ChatMessage`); a URL is
+/// passed through and fetched upstream, which reports its own failures.
+struct ImageBlock: Equatable {
+    enum Source: Equatable {
+        case base64(mediaType: String, data: String)
+        case url(String)
+    }
+    let source: Source
+
+    static let supportedMediaTypes = ["image/gif", "image/jpeg", "image/png", "image/webp"]
+
+    init(mediaType: String, base64: String) throws {
+        let type = mediaType.lowercased().trimmingCharacters(in: .whitespaces)
+        guard Self.supportedMediaTypes.contains(type) else {
+            throw ProxyRequestError("image media type \"\(mediaType)\" is not supported; use one of \(Self.supportedMediaTypes.joined(separator: ", "))")
+        }
+        // Strict decoding, with line wrapping as the one tolerated deviation:
+        // `.ignoreUnknownCharacters` would silently accept arbitrary junk as an
+        // empty image, which is the exact failure this feature exists to remove.
+        var payload = base64
+        if Data(base64Encoded: payload) == nil {
+            payload = payload.filter { !$0.isWhitespace }
+        }
+        guard let decoded = Data(base64Encoded: payload), !decoded.isEmpty else {
+            throw ProxyRequestError("image data is not valid base64")
+        }
+        source = .base64(mediaType: type, data: payload)
+    }
+
+    /// Accepts a `data:` URL (decoded inline) or an `http(s)` URL (passed through).
+    init(url: String) throws {
+        if url.hasPrefix("data:") {
+            guard let comma = url.firstIndex(of: ",") else {
+                throw ProxyRequestError("malformed data URL: no \",\" separating the header from the payload")
+            }
+            let header = url[url.index(url.startIndex, offsetBy: 5)..<comma]
+            guard header.hasSuffix(";base64") else {
+                throw ProxyRequestError("data URLs must be base64-encoded (expected `data:<media type>;base64,<payload>`)")
+            }
+            self = try ImageBlock(mediaType: String(header.dropLast(7)),
+                                  base64: String(url[url.index(after: comma)...]))
+            return
+        }
+        guard url.hasPrefix("https://") || url.hasPrefix("http://") else {
+            throw ProxyRequestError("image URL must be a `data:` URL or an http(s) URL")
+        }
+        source = .url(url)
+    }
+}
+
+/// One piece of a message's content, in the order the client sent it. Order is
+/// semantically load-bearing when text labels refer to adjacent images.
+enum MessagePart: Equatable {
+    case text(String)
+    case image(ImageBlock)
 }
 
 // MARK: - Responses (Encodable)
