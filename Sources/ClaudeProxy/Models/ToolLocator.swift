@@ -27,15 +27,21 @@ enum ToolLocator {
         process.arguments = ["-lc", "command -v claude; echo \"$PATH\""]
         let out = Pipe()
         process.standardOutput = out
-        process.standardError = Pipe()
+        // Never read, so it must not be a pipe: a login shell that prints more
+        // than the 64 KB buffer to stderr — nvm warnings, a chatty profile —
+        // would block forever with nothing draining it.
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
         } catch {
             return nil
         }
-        process.waitUntilExit()
 
+        // Read to EOF before waiting, never after. Waiting first deadlocks the
+        // same way once the shell fills the stdout buffer, and this runs on the
+        // main thread, so that freezes the app rather than one request. EOF means
+        // the shell is done; its exit status is not used.
         let data = out.fileHandleForReading.readDataToEndOfFile()
         let lines = (String(data: data, encoding: .utf8) ?? "")
             .split(separator: "\n", omittingEmptySubsequences: true)
