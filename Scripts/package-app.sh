@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# Builds a distributable "Claude Proxy.app" and zips it.
+# Builds a distributable "LLM Proxy.app" and zips it.
 #
 #   ./Scripts/package-app.sh [version]
 #
 # Produces:
-#   dist/Claude Proxy.app
-#   dist/Claude-Proxy-<version>.zip
+#   dist/LLM Proxy.app
+#   dist/LLM-Proxy-<version>.zip
 #
 # The app is a universal (arm64 + x86_64) binary. It is NOT code-signed or
 # notarized — see the README for the Gatekeeper note users will hit.
 set -euo pipefail
 
 VERSION="${1:-0.0.0}"
-APP_NAME="Claude Proxy"
+APP_NAME="LLM Proxy"
 EXEC_NAME="ClaudeProxy"
 BUNDLE_ID="com.zeus12.claude-proxy"
 ICON_SRC="Assets/AppIcon-1024.png"
@@ -108,7 +108,7 @@ else
 fi
 
 echo "==> Zipping"
-ZIP="$DIST/Claude-Proxy-$VERSION.zip"
+ZIP="$DIST/LLM-Proxy-$VERSION.zip"
 rm -f "$ZIP"
 ( cd "$DIST" && ditto -c -k --keepParent "$APP_NAME.app" "$(basename "$ZIP")" )
 

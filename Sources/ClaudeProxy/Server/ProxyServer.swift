@@ -9,14 +9,17 @@ import Network
 final class ProxyServer {
 
     let endpoint: ChatEndpoint
+    let backend: ChatBackend
     private var listener: NWListener?
     private let queue: DispatchQueue
     /// Called on the main queue with every real listener state change. The UI
     /// derives status from this only — never from "we asked it to start".
     private let onStatus: (InstanceStatus) -> Void
 
-    init(endpoint: ChatEndpoint, onStatus: @escaping (InstanceStatus) -> Void) {
+    init(endpoint: ChatEndpoint, backend: ChatBackend,
+         onStatus: @escaping (InstanceStatus) -> Void) {
         self.endpoint = endpoint
+        self.backend = backend
         self.onStatus = onStatus
         self.queue = DispatchQueue(label: "proxy.server.\(endpoint.port)")
     }
@@ -78,7 +81,7 @@ final class ProxyServer {
     // MARK: - Connection handling
 
     private func accept(_ conn: NWConnection) {
-        let handler = HTTPConnection(conn: conn, queue: queue)
+        let handler = HTTPConnection(conn: conn, queue: queue, backend: backend)
         handler.start()
     }
 }

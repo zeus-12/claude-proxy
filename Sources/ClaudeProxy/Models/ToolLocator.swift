@@ -16,6 +16,13 @@ enum ToolLocator {
     /// Cached result of the login-shell probe.
     private static var cached: Resolved?
 
+    struct ResolvedCodex {
+        let codexPath: String
+        let path: String
+    }
+
+    private static var cachedCodex: ResolvedCodex?
+
     /// Runs `<login shell> -lc 'command -v claude; echo $PATH'` once and caches
     /// the result. Returns nil if `claude` is not on the login PATH.
     static func resolve() -> Resolved? {
@@ -63,5 +70,56 @@ enum ToolLocator {
     static func refresh() -> Resolved? {
         cached = nil
         return resolve()
+    }
+
+    /// Resolve Codex separately: the ChatGPT desktop app bundles the CLI even
+    /// when no standalone `codex` executable is installed on the login PATH.
+    static func resolveCodex() -> ResolvedCodex? {
+        if let cachedCodex { return cachedCodex }
+
+        let login = loginShellPath(command: "codex")
+        let bundled = "/Applications/ChatGPT.app/Contents/Resources/codex"
+        let executable: String?
+        if let candidate = login?.executable {
+            executable = candidate
+        } else if FileManager.default.isExecutableFile(atPath: bundled) {
+            executable = bundled
+        } else {
+            executable = nil
+        }
+        guard let executable else { return nil }
+
+        let resolved = ResolvedCodex(
+            codexPath: executable,
+            path: login?.path ?? ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+        )
+        cachedCodex = resolved
+        return resolved
+    }
+
+    static func refreshCodex() -> ResolvedCodex? {
+        cachedCodex = nil
+        return resolveCodex()
+    }
+
+    /// A small, command-name-only probe shared by the Codex fallback. The
+    /// command is always a constant owned by this app, never caller input.
+    private static func loginShellPath(command: String) -> (executable: String, path: String)? {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-lc", "command -v \(command); echo \"$PATH\""]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        let lines = (String(data: data, encoding: .utf8) ?? "")
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard lines.count >= 2,
+              FileManager.default.isExecutableFile(atPath: lines[0]) else { return nil }
+        return (lines[0], lines[1])
     }
 }

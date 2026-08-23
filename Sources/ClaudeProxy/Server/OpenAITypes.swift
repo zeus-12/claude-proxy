@@ -149,14 +149,14 @@ struct ChatCompletionRequest: Decodable {
 
     /// Semantic validation beyond what Codable enforces. Throws a
     /// `ProxyRequestError` (→ HTTP 400) with a precise, client-facing message.
-    func validate() throws {
+    func validate(allowedModels: [String] = ChatModel.allowedIDs) throws {
         // `model` is required and must be one of the allowed models. Reject
         // immediately so clients get a precise 400 instead of a silent default.
-        let allowed = ChatModel.allowedIDs.joined(separator: ", ")
+        let allowed = allowedModels.joined(separator: ", ")
         guard let model, !model.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw ProxyRequestError("`model` is required; allowed models: \(allowed)")
         }
-        guard ChatModel.isAllowed(model) else {
+        guard allowedModels.contains(model) else {
             throw ProxyRequestError("`model` \"\(model)\" is not supported; allowed models: \(allowed)")
         }
         guard !messages.isEmpty else {
@@ -387,7 +387,7 @@ struct ModelEntry: Encodable {
     let id: String
     let object = "model"
     let created: Int
-    let owned_by = "anthropic"
+    let owned_by: String
 }
 
 struct ChatCompletionResponse: Encodable {
@@ -430,6 +430,19 @@ struct ChatCompletionChunk: Encodable {
         let index = 0
         let delta: Delta
         let finish_reason: String?
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(index, forKey: .index)
+            try c.encode(delta, forKey: .delta)
+            // OpenAI emits the key on every chunk: null while streaming, then
+            // "stop"/"tool_calls" on the terminal chunk. Keep both providers
+            // on that exact shape instead of omitting the nil value.
+            if let finish_reason { try c.encode(finish_reason, forKey: .finish_reason) }
+            else { try c.encodeNil(forKey: .finish_reason) }
+        }
+
+        private enum CodingKeys: String, CodingKey { case index, delta, finish_reason }
     }
 
     struct Delta: Encodable {

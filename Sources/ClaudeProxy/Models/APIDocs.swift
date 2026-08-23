@@ -36,33 +36,47 @@ enum APIDocs {
 
     // MARK: - Chat
 
-    static func chat(baseURL: String) -> Section {
-        let models = ChatModel.allowedIDs.joined(separator: ", ")
+    static func chat(backend: ChatBackend, baseURL: String) -> Section {
+        let providerModels = backend.models
+        let models = backend.allowedIDs.joined(separator: ", ")
+        let defaultModel = providerModels.first?.rawValue ?? ""
+        let runtime = backend == .claude ? "the local Claude Code CLI" : "one warm `codex app-server` process (not `codex exec`)"
+        let webDetail = backend == .claude
+            ? "Claude can fetch public URLs through its single guarded WebFetch tool. Loopback, localhost and cloud-metadata addresses are refused."
+            : "Codex can use hosted web search and browse public pages. Shell tools, command networking, MCP, apps, agents and file changes are disabled."
+        let isolation = backend == .claude
+            ? "A scratch working directory is used; MCP, skills, user settings and file tools are disabled."
+            : "Every request gets an ephemeral thread and scratch directory with approvals off and no model-initiated filesystem or command-network access."
         return Section(
-            title: "Chat",
-            systemImage: "bubble.left.and.text.bubble.right",
+            title: "\(backend.title) chat",
+            systemImage: backend.icon,
             summary: """
-            A local, OpenAI-compatible Chat Completions server backed by a Claude \
-            Code subscription. Requests are served by the `claude` CLI running on \
-            this machine; nothing is sent to a third party.
+            A local, OpenAI-compatible Chat Completions server backed only by your \
+            \(backend.subtitle). This endpoint is independent and never routes \
+            requests to the other provider. It uses \(runtime).
 
             `\(baseURL)` is a **base URL**, not a request path. OpenAI SDKs append \
             the route themselves — pass it to the client's `base_url`/`baseURL` \
             option. If you are calling it by hand, the full chat endpoint is \
             `POST \(baseURL)/chat/completions`.
 
-            Authentication: none. An `Authorization` header may be sent and is \
-            ignored, so any placeholder API key works.
+            Authentication is off by default. If you turn on **Require an API key** \
+            under \(backend.title), send that endpoint's key as \
+            `Authorization: Bearer <key>` (or `x-api-key`). Enabling it stores the \
+            key in Keychain; Claude, Codex and Voice are configured separately.
             """,
             entries: [
                 Entry(title: "Base URL",
-                      detail: "Point any OpenAI-compatible client here. The API key is ignored.",
+                      detail: "Point any OpenAI-compatible client here. Authentication is optional and configured under \(backend.title).",
                       code: baseURL),
+                Entry(title: "API key",
+                      detail: "Optional. Turn on Require an API key under \(backend.title), then copy its separate key here.",
+                      code: "Authorization: Bearer <key>"),
                 Entry(title: "Chat completions",
                       detail: "OpenAI Chat Completions. Send `messages`; get a `chat.completion` back.",
                       code: "POST \(baseURL)/chat/completions"),
                 Entry(title: "Models",
-                      detail: "The request `model` is required and must be one of these, else the request is rejected with a 400.",
+                      detail: "The request `model` is required and must be one of these. Models from the other provider are rejected with a 400.",
                       code: models),
                 Entry(title: "Streaming",
                       detail: "Set `\"stream\": true` to receive Server-Sent Events — a stream of `chat.completion.chunk` deltas ending in `[DONE]`.",
@@ -79,12 +93,12 @@ enum APIDocs {
                 Entry(title: "Health",
                       detail: "Liveness check. Returns `{ \"status\": \"ok\", \"models\": [...] }`.",
                       code: "GET \(rootURL(from: baseURL))/health"),
-                Entry(title: "Web fetch",
-                      detail: "Give the model a public URL and it will fetch the page and answer from it. This is the only tool it can actually run. Internal addresses — `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`, and the cloud metadata address — are refused, so the endpoint cannot be used to reach services that are only reachable from this machine.",
+                Entry(title: backend == .claude ? "Web fetch" : "Chat-only runtime",
+                      detail: webDetail,
                       code: "\"Summarise https://example.com\""),
                 Entry(title: "Isolation",
-                      detail: "Apart from web fetch the CLI runs as a text generator: no other built-in tools, no MCP servers, no skills or slash commands, no user settings or CLAUDE.md, and a scratch working directory. File reads are denied at the permission layer, so a request cannot pull files off this machine, and message text is forwarded to the model exactly as sent. `tools` you send are answered as JSON directives for you to execute — the model never runs them.",
-                      code: "web fetch only · no MCP · no skills · no file access"),
+                      detail: "\(isolation) OpenAI `tools` are returned as JSON directives for your client; the proxy does not execute them.",
+                      code: "ephemeral · no host file or command-network access"),
                 Entry(title: "Unsupported fields",
                       detail: "Accepted for compatibility and then ignored — the CLI backend exposes no controls for them. Do not rely on them having any effect.",
                       code: "temperature, top_p, max_tokens, n, stop, penalties, seed"),
@@ -95,7 +109,7 @@ enum APIDocs {
                 curl \(baseURL)/chat/completions \\
                   -H "Content-Type: application/json" \\
                   -d '{
-                    "model": "sonnet",
+                    "model": "\(defaultModel)",
                     "messages": [{"role": "user", "content": "Hello!"}]
                   }'
                 ```
@@ -105,7 +119,7 @@ enum APIDocs {
                 curl -N \(baseURL)/chat/completions \\
                   -H "Content-Type: application/json" \\
                   -d '{
-                    "model": "sonnet",
+                    "model": "\(defaultModel)",
                     "stream": true,
                     "messages": [{"role": "user", "content": "Count to five."}]
                   }'
@@ -116,7 +130,7 @@ enum APIDocs {
                 curl \(baseURL)/chat/completions \\
                   -H "Content-Type: application/json" \\
                   -d '{
-                    "model": "sonnet",
+                    "model": "\(defaultModel)",
                     "messages": [{"role": "user", "content": [
                       {"type": "text", "text": "What is in this image?"},
                       {"type": "image_url", "image_url": {"url": "data:image/png;base64,'"$(base64 -i shape.png)"'"}}
@@ -128,10 +142,11 @@ enum APIDocs {
                 ```python
                 from openai import OpenAI
 
+                # Use the endpoint key instead if authentication is enabled.
                 client = OpenAI(base_url="\(baseURL)", api_key="not-needed")
 
                 response = client.chat.completions.create(
-                    model="sonnet",
+                    model="\(defaultModel)",
                     messages=[{"role": "user", "content": "Hello!"}],
                 )
                 print(response.choices[0].message.content)
@@ -143,11 +158,12 @@ enum APIDocs {
 
                 const client = new OpenAI({
                   baseURL: "\(baseURL)",
+                  // Use the endpoint key instead if authentication is enabled.
                   apiKey: "not-needed",
                 });
 
                 const response = await client.chat.completions.create({
-                  model: "sonnet",
+                  model: "\(defaultModel)",
                   messages: [{ role: "user", content: "Hello!" }],
                 });
                 console.log(response.choices[0].message.content);
@@ -156,13 +172,17 @@ enum APIDocs {
                 Example(title: "Errors", body: """
                 Errors use OpenAI's shape: `{ "error": { "message": ..., "type": ... } }`.
 
+                - `401` — authentication is enabled and the API key is missing or \
+                wrong. Copy the \(backend.title) key from the app and send it as \
+                `Authorization: Bearer <key>`.
                 - `400` — `model` missing or not in (\(models)); `messages` empty; a \
                 message has an unknown `role`; a `role: "tool"` message is missing \
                 `tool_call_id`; an image has an unsupported media type, invalid \
                 base64, or a URL scheme other than `data:`/`http(s)`.
                 - `404` — wrong path. Remember `\(baseURL)` is a base URL; the \
                 request path is `\(baseURL)/chat/completions`.
-                - `502` — the `claude` CLI could not be found or failed to run.
+                - `502` — the \(backend.title) runtime could not be found, was not \
+                signed in, or failed to run.
                 """),
             ]
         )
@@ -188,8 +208,12 @@ enum APIDocs {
             - **Legacy** (`/`) — the original minimal protocol, still used by the \
             TypeWhisper plugin.
 
-            Authentication: none. A Deepgram-style `Authorization: Token …` \
-            header may be sent and is ignored, so any placeholder key works.
+            Authentication is off by default. If you turn on **Require an API \
+            key** under Voice, send its key as \
+            `Authorization: Token <key>`, as `?token=<key>`, or as the \
+            `token, <key>` WebSocket subprotocol — browser clients cannot set \
+            headers, so the last two exist for them. The key is in the app under \
+            Voice, and is separate from the Claude and Codex keys.
 
             Read the limitations below before wiring this into anything that \
             relies on word-level timing — Claude returns transcript text only.
@@ -198,6 +222,9 @@ enum APIDocs {
                 Entry(title: "Base URL (Deepgram clients)",
                       detail: "Configure this as the API base. Clients append `/listen` themselves, giving `\(baseURL)/listen`.",
                       code: baseURL),
+                Entry(title: "API key",
+                      detail: "Optional and separate from the Claude and Codex keys. Enable it under Voice before configuring clients to send `Authorization: Token …`.",
+                      code: "Authorization: Token <key>   ·   ?token=<key>"),
                 Entry(title: "WebSocket URL",
                       detail: "The full Deepgram route, if you are connecting by hand. `\(endpointURL)/listen` also works.",
                       code: "\(endpointURL)/v1/listen"),
@@ -303,6 +330,8 @@ enum APIDocs {
                 Deepgram-protocol failures arrive as an `Error` message and the \
                 socket closes:
 
+                - When authentication is enabled, a missing or wrong API key — \
+                refused with a 401 before the socket opens, not as an `Error` message.
                 - Missing `encoding`, or an `encoding` other than `linear16`.
                 - Missing or invalid `sample_rate`, or `channels` outside 1–8.
                 - An unknown path. Use `/v1/listen` or `/listen` for the Deepgram \
@@ -319,7 +348,7 @@ enum APIDocs {
     /// Serialize one section as standalone Markdown.
     static func markdown(for section: Section) -> String {
         """
-        # Claude Proxy — \(section.title) API
+        # LLM Proxy — \(section.title) API
 
         \(section.summary)
 
@@ -344,11 +373,13 @@ enum APIDocs {
         }.joined(separator: "\n\n---\n\n")
 
         return """
-        # Claude Proxy — API reference
+        # LLM Proxy — API reference
 
-        Claude Proxy runs local servers on this machine that expose a Claude Code \
-        subscription over ordinary HTTP and WebSocket APIs. Both are \
-        loopback-only (`127.0.0.1`) and require no authentication.
+        LLM Proxy runs local servers on this machine. Chat exposes Claude Code \
+        and Codex models through an OpenAI-compatible API; Voice exposes Claude \
+        speech-to-text through WebSocket APIs. Both are loopback-only \
+        (`127.0.0.1`). API-key authentication is optional and configured \
+        independently for each endpoint.
 
         \(body)
         """

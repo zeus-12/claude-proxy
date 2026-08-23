@@ -1,38 +1,40 @@
-# claude-proxy
+# LLM Proxy
 
 **One subscription. AI in every app.**
 
-A simple menu-bar-only macOS app that exposes an OpenAI-compatible endpoint to
-your Claude Code subscription.
+A menu-bar-only macOS app that exposes separate OpenAI-compatible endpoints for
+your Claude Code and Codex subscriptions.
 
-<p align="center">
-  <img src="docs/menubar.png" alt="claude-proxy menu bar app" width="380">
-</p>
-
-`claude-proxy` turns your Claude Code subscription into a local, OpenAI-compatible
-API. You run it once, and it gives you a URL like `http://127.0.0.1:8787/v1`.
-Paste that URL into any app that lets you point at a custom OpenAI endpoint — and
-that app now has AI, powered by the subscription you already pay for.
+LLM Proxy gives each sign-in its own local API, switch, optional key, settings, and
+help page. Claude defaults to `http://127.0.0.1:8787/v1`; Codex defaults to
+`http://127.0.0.1:8788/v1`. Paste the provider URL into any app that supports a
+custom OpenAI endpoint.
 
 No separate per-app AI plan. No extra tokens to buy. The apps you already use just
 start talking to the model through your one subscription.
 
-Add as many endpoints as you want — one per port, each backed by whatever Claude
-model you choose.
+The endpoints never route across providers. Claude accepts `sonnet`, `opus`, and
+`haiku`; Codex accepts `gpt-5.6`, `gpt-5.6-sol`, `gpt-5.6-terra`, and
+`gpt-5.6-luna`.
 
 ---
 
 ## How it works
 
-Each "instance" runs a small local HTTP server that speaks the OpenAI
-`/v1/chat/completions` (and `/v1/models`) protocol. When a request comes in, it
-drives the headless `claude` CLI (`claude -p --output-format stream-json`) and
-streams the response back in OpenAI's format. Tool use is disabled and the system
-prompt is overridden, so responses behave like a plain chat model.
+Both Chat endpoints speak OpenAI `/v1/chat/completions` and `/v1/models`. Claude
+drives the headless `claude` CLI. Codex keeps one official local `app-server`
+process warm—there is no `codex exec` wrapper—and creates an isolated ephemeral
+thread per request.
+
+Codex may use hosted web search/browse. Shell execution, file changes, MCP,
+apps, skills, and subagents are disabled. Images and caller-defined OpenAI
+function tools are supported; function calls are returned to the client and are
+never executed by the proxy.
 
 ```
-your app  ──HTTP──▶  claude-proxy (localhost:8787)  ──▶  claude CLI  ──▶  your subscription
-        ◀──OpenAI JSON / SSE──
+Claude client ──HTTP :8787──▶ claude CLI
+Codex client  ──HTTP :8788──▶ warm Codex app-server
+             ◀──── OpenAI JSON / SSE ────
 ```
 
 ## Dictation — voice endpoint for TypeWhisper
@@ -56,24 +58,25 @@ running** — the plugin connects to it. The popover shows the endpoint status.
 ## Requirements
 
 - macOS 14 or later
-- [Claude Code](https://claude.com/claude-code) installed and logged in
-  (`claude` must be on your login shell's `PATH`)
+- At least one local client installed and logged in:
+  - [Claude Code](https://claude.com/claude-code) for Claude chat models and Voice
+  - [Codex](https://developers.openai.com/codex/) or the ChatGPT desktop app for GPT chat models
 - Swift 6 toolchain (Xcode command-line tools) to build
 
 ## Install
 
-1. Download the latest `Claude-Proxy-<version>.zip` from the
+1. Download the latest `LLM-Proxy-<version>.zip` from the
    [Releases](https://github.com/zeus-12/claude-proxy/releases) page.
-2. Unzip it and move **Claude Proxy.app** to `/Applications`.
+2. Unzip it and move **LLM Proxy.app** to `/Applications`.
 3. Open it the first time using **one of the two workarounds below**.
 4. It launches into the menu bar (no Dock icon) — click the icon to use it.
 
-### "Claude Proxy can't be opened" — why, and how to get past it
+### "LLM Proxy can't be opened" — why, and how to get past it
 
 macOS tags anything downloaded from the internet with a *quarantine* flag, and
 **Gatekeeper refuses to open apps that aren't signed and notarized by a paid
 Apple Developer account** ($99/yr — which this app doesn't have). So on first
-launch you'll see a warning like *"Apple could not verify Claude Proxy is free of
+launch you'll see a warning like *"Apple could not verify LLM Proxy is free of
 malware."* The app is fine; it just isn't notarized. Get past it either way:
 
 - **Right-click** (or Control-click) the app in Finder → **Open** → **Open** again
@@ -81,7 +84,7 @@ malware."* The app is fine; it just isn't notarized. Get past it either way:
 - **Or** clear the quarantine flag from the terminal once:
 
   ```bash
-  xattr -dr com.apple.quarantine "/Applications/Claude Proxy.app"
+  xattr -dr com.apple.quarantine "/Applications/LLM Proxy.app"
   ```
 
 You only have to do this once, right after installing (or after each update).
@@ -100,24 +103,26 @@ swift run
 ```
 
 It launches as a **menu-bar app** — no Dock icon, no window. Click the icon in the
-menu bar to add, start, stop, and edit instances. The first instance defaults to
-model `sonnet` on port `8787`.
+menu bar to start, stop, configure, or open help for each endpoint.
+All endpoints and their optional API-key authentication start off disabled.
 
 To stop it: `pkill -f ClaudeProxy`.
 
 ## Point an app at it
 
-In any OpenAI-compatible client (chat apps, editors, SDKs):
+In any OpenAI-compatible client, choose one provider:
 
-| Field        | Value                          |
-| ------------ | ------------------------------ |
-| Base URL     | `http://127.0.0.1:8787/v1`     |
-| API key      | any non-empty string (ignored) |
-| Model        | `sonnet` (or your instance's model) |
+| Provider | Base URL | API key | Models |
+| --- | --- | --- | --- |
+| Claude | `http://127.0.0.1:8787/v1` | Optional Claude key | `sonnet`, `opus`, `haiku` |
+| Codex | `http://127.0.0.1:8788/v1` | Optional Codex key | supported GPT-5.6 ids |
 
 ### Try it with curl
 
-Non-streaming:
+Turn on the endpoint in the menu first. Authentication is optional unless you
+enable **Require an API key** for that endpoint.
+
+Claude, non-streaming:
 
 ```bash
 curl http://127.0.0.1:8787/v1/chat/completions \
@@ -128,22 +133,29 @@ curl http://127.0.0.1:8787/v1/chat/completions \
   }'
 ```
 
-Streaming (SSE):
+Codex, streaming (SSE):
 
 ```bash
-curl -N http://127.0.0.1:8787/v1/chat/completions \
+curl -N http://127.0.0.1:8788/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "sonnet",
+    "model": "gpt-5.6-luna",
     "stream": true,
     "messages": [{"role": "user", "content": "Count from 1 to 5."}]
   }'
 ```
 
+HTTPie Desktop waits for the transaction to finish before painting its response
+pane. To verify incremental SSE delivery, use `curl -N` as above or HTTPie CLI
+with `http --stream`.
+
 ## Using it beyond your Mac
 
 The server binds to `127.0.0.1` only. To reach it from another device or a hosted
 app, run a local tunnel — it runs on your Mac and forwards to the port:
+
+Before opening a tunnel, turn on **Require an API key** for that endpoint. With
+authentication off, any client that can reach the tunnel can use your subscription.
 
 ```bash
 ngrok http 8787
@@ -157,11 +169,16 @@ cloudflared tunnel --url http://127.0.0.1:8787
   general-purpose API endpoint. That's in tension with Anthropic's terms, which
   license the subscription for use *through* their client — not as a redistributable
   gateway. Use it for yourself, at your own risk.
-- **It's an agent, not the raw API.** Output comes from the Claude Code agent with
-  its baseline context, so it isn't byte-for-byte identical to the Anthropic API.
-- **Per-request token floor.** Each request carries ~12k tokens of baseline context,
-  which counts against your subscription's usage limits. Short replies still cost
-  that floor.
+- **Codex uses a documented integration boundary.** GPT requests use Codex's local
+  app-server protocol and your existing Codex authentication. The server stays on
+  `127.0.0.1`; do not expose it to untrusted users.
+- **Codex app-server is experimental.** OpenAI documents the protocol for rich
+  client integrations, but its shape may change between Codex releases.
+- **These are agents, not raw APIs.** Output comes from the local Claude Code or
+  Codex harness and is translated to Chat Completions, so it is not byte-for-byte
+  identical to either provider's hosted API.
+- **Per-request token floor.** Coding clients carry baseline context, which counts
+  against subscription usage even for short replies.
 
 ## Releasing (maintainers)
 
@@ -174,7 +191,7 @@ Releases are tag-driven. One command from a clean `main` cuts a release:
 It verifies you're on `main` with a clean tree, pushes `main`, then creates and
 pushes the `v0.1.1` tag. Pushing that tag triggers
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds a
-universal `Claude Proxy.app` on a macOS runner and publishes it as a GitHub
+universal `LLM Proxy.app` on a macOS runner and publishes it as a GitHub
 Release with the zip attached. The **git tag is the single source of truth** for
 the version.
 

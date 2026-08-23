@@ -25,6 +25,8 @@ struct VoiceSettingsPane: View {
                 .toggleStyle(.switch)
             }
 
+            APIKeySection(scope: .voice)
+
             Section {
                 LabeledContent("Port") {
                     HStack(spacing: 8) {

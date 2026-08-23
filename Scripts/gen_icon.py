@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the Claude Proxy app icon SVG.
+"""Generate the LLM Proxy app icon SVG.
 
 Flat black Apple-style squircle (continuous-corner superellipse) + a single
 white Lucide `arrow-left-right` glyph, stroked exactly as Lucide renders it.

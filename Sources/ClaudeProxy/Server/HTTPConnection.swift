@@ -1,11 +1,29 @@
 import Foundation
 import Network
 
+enum ToolStreamClassification: Equatable {
+    case undecided
+    case text
+    case toolCandidate
+}
+
+/// Tool calls arrive as a JSON envelope, so only that small ambiguous prefix
+/// must be held back. Ordinary prose can be forwarded as soon as its first
+/// non-whitespace character proves it is not a tool envelope.
+enum ToolStreamClassifier {
+    static func classify(_ prefix: String) -> ToolStreamClassification {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return .undecided }
+        return first == "{" || first == "`" ? .toolCandidate : .text
+    }
+}
+
 /// Reads one HTTP request off a connection, routes it, writes the response, and
 /// closes. One connection = one request (`Connection: close`).
 final class HTTPConnection {
     private let conn: NWConnection
     private let queue: DispatchQueue
+    private let backend: ChatBackend
     private var buffer = Data()
     /// Keeps this object alive for the duration of the connection. The
     /// NWConnection's callbacks capture `self` weakly, so without this strong
@@ -13,9 +31,10 @@ final class HTTPConnection {
     /// returns. Cleared in `close()`.
     private var selfRetain: HTTPConnection?
 
-    init(conn: NWConnection, queue: DispatchQueue) {
+    init(conn: NWConnection, queue: DispatchQueue, backend: ChatBackend) {
         self.conn = conn
         self.queue = queue
+        self.backend = backend
     }
 
     func start() {
@@ -60,21 +79,33 @@ final class HTTPConnection {
             return
         }
 
+        // Liveness stays open so a client can check the endpoint is up before it
+        // has been given a key; it exposes nothing but the model list.
+        let isPublic = request.path == "/" || request.path == "/health"
+        if !isPublic, !APIKey.accepts(APIKey.presented(headers: request.headers), for: backend.keyScope) {
+            writeError(status: 401,
+                       message: "Invalid API key. Send it as `Authorization: Bearer <key>`; "
+                              + "the key is in LLM Proxy settings.",
+                       type: "invalid_request_error")
+            return
+        }
+
         switch (request.method, request.path) {
         case ("GET", "/v1/models"):
             handleModels()
         case ("POST", "/v1/chat/completions"):
             handleChat(request)
         case ("GET", "/"), ("GET", "/health"):
-            writeJSON(status: 200, object: ["status": "ok", "models": ChatModel.allowedIDs])
+            writeJSON(status: 200, object: ["status": "ok", "provider": backend.rawValue,
+                                            "models": backend.allowedIDs])
         default:
             writeError(status: 404, message: "Not found: \(request.method) \(request.path)")
         }
     }
 
     private func handleModels() {
-        let response = ModelListResponse(data: ChatModel.allowedIDs.map {
-            ModelEntry(id: $0, created: OpenAIIDs.now)
+        let response = ModelListResponse(data: backend.models.map {
+            ModelEntry(id: $0.rawValue, created: OpenAIIDs.now, owned_by: $0.owner)
         })
         writeEncodable(status: 200, response)
     }
@@ -87,7 +118,7 @@ final class HTTPConnection {
         let decoded: ChatCompletionRequest
         do {
             decoded = try JSONDecoder().decode(ChatCompletionRequest.self, from: body)
-            try decoded.validate()
+            try decoded.validate(allowedModels: backend.allowedIDs)
         } catch let e as ProxyRequestError {
             writeError(status: 400, message: e.message)
             return
@@ -103,26 +134,42 @@ final class HTTPConnection {
         // `validate()` has already guaranteed `model` is present and allowed.
         let model = decoded.model ?? ChatModel.sonnet.rawValue
 
-        // Tool calling: the model emits the tool call as JSON in its full output,
-        // which we must inspect before responding — so we buffer rather than
-        // stream-through. Only engaged when tools are present and not disabled.
+        // Tool calling: a JSON-looking response must be inspected as a complete
+        // envelope, but ordinary prose can still stream through immediately.
         let toolsActive: Bool = {
             guard let tools = decoded.tools, !tools.isEmpty else { return false }
             if case .none? = decoded.tool_choice { return false }
             return true
         }()
 
-        let result: ClaudeBackend.StreamResult
+        guard let chatModel = ChatModel(rawValue: model), chatModel.backend == backend else {
+            writeError(status: 400, message: "Unsupported model \(model)")
+            return
+        }
+
+        let result: ChatStreamResult
         do {
-            result = try ClaudeBackend.stream(model: model, messages: decoded.messages,
-                                              tools: decoded.tools, toolChoice: decoded.tool_choice)
+            switch backend {
+            case .claude:
+                result = try ClaudeBackend.stream(model: chatModel.cliAlias,
+                                                  messages: decoded.messages,
+                                                  tools: decoded.tools,
+                                                  toolChoice: decoded.tool_choice)
+            case .codex:
+                result = try CodexBackend.stream(model: chatModel.cliAlias,
+                                                 messages: decoded.messages,
+                                                 tools: decoded.tools,
+                                                 toolChoice: decoded.tool_choice)
+            }
         } catch {
             writeError(status: 502, message: error.localizedDescription)
             return
         }
 
-        if toolsActive {
-            respondToolAware(result, model: model, stream: wantsStream)
+        if toolsActive && wantsStream {
+            streamToolAware(result, model: model)
+        } else if toolsActive {
+            collectToolAware(result, model: model)
         } else if wantsStream {
             streamChat(result, model: model)
         } else {
@@ -130,9 +177,9 @@ final class HTTPConnection {
         }
     }
 
-    /// Buffer the full output, then decide whether it's a tool call or plain text
-    /// and respond in the requested shape (JSON or SSE).
-    private func respondToolAware(_ result: ClaudeBackend.StreamResult, model: String, stream: Bool) {
+    /// Non-streaming tool-aware responses still need the complete output before
+    /// choosing between a message and an OpenAI-compatible tool call.
+    private func collectToolAware(_ result: ChatStreamResult, model: String) {
         Task {
             var text = ""
             do {
@@ -144,65 +191,89 @@ final class HTTPConnection {
                 return
             }
             let calls = ClaudeBackend.parseToolCalls(text)
-            if stream {
-                streamToolAware(model: model, calls: calls, text: text)
+            let message: ChatCompletionResponse.Message
+            let finish: String
+            if let calls {
+                message = .init(content: nil, tool_calls: calls)
+                finish = "tool_calls"
             } else {
-                let message: ChatCompletionResponse.Message
-                let finish: String
-                if let calls {
-                    message = .init(content: nil, tool_calls: calls)
-                    finish = "tool_calls"
-                } else {
-                    message = .init(content: text, tool_calls: nil)
-                    finish = "stop"
-                }
-                let response = ChatCompletionResponse(
-                    id: OpenAIIDs.chatID(), created: OpenAIIDs.now, model: model,
-                    choices: [.init(message: message, finish_reason: finish)]
-                )
-                writeEncodable(status: 200, response)
+                message = .init(content: text, tool_calls: nil)
+                finish = "stop"
             }
+            let response = ChatCompletionResponse(
+                id: OpenAIIDs.chatID(), created: OpenAIIDs.now, model: model,
+                choices: [.init(message: message, finish_reason: finish)]
+            )
+            writeEncodable(status: 200, response)
         }
     }
 
-    /// Emit a buffered tool-aware result as SSE deltas (one full tool-call delta
-    /// per call, or the text as a single content delta), then `[DONE]`.
-    private func streamToolAware(model: String, calls: [ToolCall]?, text: String) {
+    /// Streams prose immediately even when the client supplied tools. Only a
+    /// JSON/fenced prefix remains buffered until it can be parsed as a tool call.
+    private func streamToolAware(_ result: ChatStreamResult, model: String) {
         let id = OpenAIIDs.chatID()
         let created = OpenAIIDs.now
         writeRaw(status: 200, headers: sseHeaders, body: Data(), keepOpen: true)
 
-        func send(_ delta: ChatCompletionChunk.Delta, finish: String?) {
-            let chunk = ChatCompletionChunk(
-                id: id, created: created, model: model,
-                choices: [.init(delta: delta, finish_reason: finish)]
-            )
-            if let data = try? JSONEncoder().encode(chunk) {
-                sendSSE(Data("data: ".utf8) + data + Data("\n\n".utf8))
-            }
-        }
+        Task {
+            sendChunk(id: id, created: created, model: model,
+                      delta: .init(role: "assistant"), finish: nil)
 
-        send(.init(role: "assistant"), finish: nil)
-        if let calls {
-            let deltas = calls.enumerated().map { i, c in
-                ChatCompletionChunk.ToolCallDelta(
-                    index: i, id: c.id,
-                    function: .init(name: c.function.name, arguments: c.function.arguments))
+            var buffered = ""
+            var classification = ToolStreamClassification.undecided
+            do {
+                for try await delta in result.deltas {
+                    if classification == .text {
+                        sendChunk(id: id, created: created, model: model,
+                                  delta: .init(content: delta), finish: nil)
+                        continue
+                    }
+
+                    buffered += delta
+                    classification = ToolStreamClassifier.classify(buffered)
+                    if classification == .text {
+                        sendChunk(id: id, created: created, model: model,
+                                  delta: .init(content: buffered), finish: nil)
+                        buffered = ""
+                    }
+                }
+
+                if classification == .toolCandidate,
+                   let calls = ClaudeBackend.parseToolCalls(buffered) {
+                    let deltas = calls.enumerated().map { index, call in
+                        ChatCompletionChunk.ToolCallDelta(
+                            index: index, id: call.id,
+                            function: .init(name: call.function.name,
+                                            arguments: call.function.arguments)
+                        )
+                    }
+                    sendChunk(id: id, created: created, model: model,
+                              delta: .init(tool_calls: deltas), finish: nil)
+                    sendChunk(id: id, created: created, model: model,
+                              delta: .init(), finish: "tool_calls")
+                } else {
+                    if !buffered.isEmpty {
+                        sendChunk(id: id, created: created, model: model,
+                                  delta: .init(content: buffered), finish: nil)
+                    }
+                    sendChunk(id: id, created: created, model: model,
+                              delta: .init(), finish: "stop")
+                }
+            } catch {
+                let payload = OpenAIError(error.localizedDescription)
+                if let data = try? JSONEncoder().encode(payload) {
+                    sendSSE(Data("data: ".utf8) + data + Data("\n\n".utf8))
+                }
             }
-            send(.init(tool_calls: deltas), finish: nil)
-            send(.init(), finish: "tool_calls")
-        } else {
-            send(.init(content: text), finish: nil)
-            send(.init(), finish: "stop")
+            conn.send(content: Data("data: [DONE]\n\n".utf8), completion: .contentProcessed { [weak self] _ in
+                self?.close()
+            })
         }
-        conn.send(content: Data("data: [DONE]\n\n".utf8), completion: .contentProcessed { [weak self] _ in
-            self?.close()
-        })
     }
 
     // MARK: - Streaming (SSE)
 
-    private func streamChat(_ result: ClaudeBackend.StreamResult, model: String) {
+    private func streamChat(_ result: ChatStreamResult, model: String) {
         let id = OpenAIIDs.chatID()
         let created = OpenAIIDs.now
         writeRaw(status: 200, headers: sseHeaders, body: Data(), keepOpen: true)
@@ -231,9 +302,15 @@ final class HTTPConnection {
     }
 
     private func sendChunk(id: String, created: Int, model: String, role: String?, content: String?, finish: String?) {
+        sendChunk(id: id, created: created, model: model,
+                  delta: .init(role: role, content: content), finish: finish)
+    }
+
+    private func sendChunk(id: String, created: Int, model: String,
+                           delta: ChatCompletionChunk.Delta, finish: String?) {
         let chunk = ChatCompletionChunk(
             id: id, created: created, model: model,
-            choices: [.init(delta: .init(role: role, content: content), finish_reason: finish)]
+            choices: [.init(delta: delta, finish_reason: finish)]
         )
         guard let data = try? JSONEncoder().encode(chunk) else { return }
         sendSSE(Data("data: ".utf8) + data + Data("\n\n".utf8))
@@ -245,7 +322,7 @@ final class HTTPConnection {
 
     // MARK: - Non-streaming
 
-    private func collectChat(_ result: ClaudeBackend.StreamResult, model: String) {
+    private func collectChat(_ result: ChatStreamResult, model: String) {
         Task {
             var text = ""
             do {
@@ -289,7 +366,7 @@ final class HTTPConnection {
         [
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key"
         ]
     }
 
@@ -317,8 +394,8 @@ final class HTTPConnection {
         writeRaw(status: status, headers: headers, body: data)
     }
 
-    private func writeError(status: Int, message: String) {
-        writeEncodable(status: status, OpenAIError(message))
+    private func writeError(status: Int, message: String, type: String = "proxy_error") {
+        writeEncodable(status: status, OpenAIError(message, type: type))
     }
 
     /// Write a full HTTP response. When `keepOpen` is true (SSE) we leave the
@@ -353,6 +430,7 @@ final class HTTPConnection {
         case 200: return "OK"
         case 204: return "No Content"
         case 400: return "Bad Request"
+        case 401: return "Unauthorized"
         case 404: return "Not Found"
         case 500: return "Internal Server Error"
         case 502: return "Bad Gateway"

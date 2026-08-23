@@ -75,8 +75,8 @@ enum ClaudeBackend {
     You are a helpful AI assistant accessed through an API endpoint. Respond \
     directly to the user's messages. You can fetch public web pages when the user \
     gives you a URL. You have no other tools and no access to files, the \
-    filesystem, or the user's computer. Do not mention being Claude Code or any \
-    coding harness.
+    filesystem, or the user's computer. Do not mention the underlying coding \
+    harness.
     """
 
     /// Used instead of `baseSystemPrompt` when the caller supplies function tools.
@@ -90,13 +90,8 @@ enum ClaudeBackend {
     You convert user requests into structured JSON directives for an external \
     system. You have no tools and you NEVER perform actions or fetch data yourself \
     — you ONLY write JSON text. This is pure text generation, not tool use. Do not \
-    mention being Claude Code or any coding harness.
+    mention the underlying coding harness.
     """
-
-    struct StreamResult {
-        /// Async stream of text deltas as the model produces them.
-        let deltas: AsyncThrowingStream<String, Error>
-    }
 
     /// One block of the user turn we hand to the CLI, in client order.
     enum PromptBlock: Equatable {
@@ -287,7 +282,7 @@ enum ClaudeBackend {
     /// Launch the CLI and stream text deltas. Throws if `claude` can't be found
     /// or the process fails before producing output.
     static func stream(model: String, messages: [ChatMessage],
-                       tools: [Tool]? = nil, toolChoice: ToolChoice? = nil) throws -> StreamResult {
+                       tools: [Tool]? = nil, toolChoice: ToolChoice? = nil) throws -> ChatStreamResult {
         guard let cli = ToolLocator.resolve() else {
             throw BackendError.claudeNotFound
         }
@@ -400,7 +395,7 @@ enum ClaudeBackend {
             }
         }
 
-        return StreamResult(deltas: stream)
+        return ChatStreamResult(deltas: stream)
     }
 
     /// The two stdin lines for one turn: the Agent SDK's initialize handshake,
@@ -535,12 +530,15 @@ private final class OutputBuffer: @unchecked Sendable {
 
 enum BackendError: LocalizedError {
     case claudeNotFound
+    case codexNotFound
     case modelError(String)
 
     var errorDescription: String? {
         switch self {
         case .claudeNotFound:
             return "Could not find the `claude` CLI on your login PATH. Make sure Claude Code is installed and logged in."
+        case .codexNotFound:
+            return "Could not find the `codex` CLI. Install Codex or the ChatGPT desktop app, then sign in."
         case .modelError(let m):
             return m
         }

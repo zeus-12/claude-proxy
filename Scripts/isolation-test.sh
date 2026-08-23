@@ -21,6 +21,7 @@ PORT="${1:-8801}"
 URL="http://127.0.0.1:$PORT/v1/chat/completions"
 PASS=0; FAIL=0
 FAILED_NAMES=()
+AUTH=()
 
 cleanup() {
     [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null
@@ -47,7 +48,7 @@ SKILL_PHRASE=""
 # ---------------------------------------------------------------- harness
 ask() { # $1 = JSON body -> prints assistant content
     curl -s --max-time 300 -w '<<META %{http_code} %{time_total}s>>' \
-        -X POST "$URL" -H 'content-type: application/json' -d "$1" \
+        -X POST "$URL" -H 'content-type: application/json' "${AUTH[@]}" -d "$1" \
     | python3 -c "
 import sys, json, re
 raw = sys.stdin.read()
@@ -109,6 +110,13 @@ for _ in $(seq 1 20); do
 done
 curl -s --max-time 2 "http://127.0.0.1:$PORT/health" >/dev/null || { echo "server did not start"; exit 1; }
 echo "Server up on :$PORT"
+
+echo
+echo "── Authentication ───────────────────────────────────────────"
+code() { curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$@"; }
+record "health needs no key" "$([[ $(code "http://127.0.0.1:$PORT/health") == 200 ]] && echo 1 || echo 0)" "$(code "http://127.0.0.1:$PORT/health")"
+record "preflight needs no key" "$([[ $(code -X OPTIONS "$URL") == 204 ]] && echo 1 || echo 0)" "$(code -X OPTIONS "$URL")"
+record "authentication is opt-in" "$([[ $(code "http://127.0.0.1:$PORT/v1/models") == 200 ]] && echo 1 || echo 0)" "$(code "http://127.0.0.1:$PORT/v1/models")"
 
 echo
 echo "── File reads ───────────────────────────────────────────────"
@@ -201,7 +209,7 @@ echo "── Endpoint still behaves ──────────────�
 want "plain completion"         "Reply with exactly: PONG" "PONG"
 want "system prompt honoured"   "$(python3 -c "print('x')" >/dev/null; echo 'Reply with exactly: PONG')" "PONG"
 
-STREAM=$(curl -sN --max-time 120 -X POST "$URL" -H 'content-type: application/json' \
+STREAM=$(curl -sN --max-time 120 -X POST "$URL" -H 'content-type: application/json' "${AUTH[@]}" \
     -d '{"model":"sonnet","stream":true,"messages":[{"role":"user","content":"Count to five, digits only."}]}' | grep -c "^data: ")
 record "streaming emits chunks" "$([[ "$STREAM" -ge 3 ]] && echo 1 || echo 0)" "chunks=$STREAM"
 
@@ -252,11 +260,11 @@ done
 ORDER=$(ask "$(cat "$FIXTURES/img_order.json")")
 record "interleaved image order" "$([[ "$ORDER" == *"SQUARE CIRCLE SQUARE"* ]] && echo 1 || echo 0)" "$ORDER"
 
-BAD=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -X POST "$URL" -H 'content-type: application/json' \
+BAD=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 -X POST "$URL" -H 'content-type: application/json' "${AUTH[@]}" \
     -d '{"model":"sonnet","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/tiff;base64,AAAA"}}]}]}')
 record "bad media type rejected 400" "$([[ "$BAD" == "400" ]] && echo 1 || echo 0)" "HTTP $BAD"
 
-FILEURL=$(curl -s --max-time 30 -X POST "$URL" -H 'content-type: application/json' \
+FILEURL=$(curl -s --max-time 30 -X POST "$URL" -H 'content-type: application/json' "${AUTH[@]}" \
     -d "{\"model\":\"sonnet\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"file://$FIXTURES/secret.txt\"}}]}]}")
 record "file:// image rejected" "$([[ "$FILEURL" == *"data:"* || "$FILEURL" == *"http"* ]] && echo 1 || echo 0)" "$FILEURL"
 

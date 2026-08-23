@@ -163,6 +163,179 @@ enum ProxySelfTest {
                   blankContent.count == 1 && blankContent[0]["type"] as? String == "image")
         }
 
+        print("ProxySelfTest — API key")
+
+        do {
+            check("bearer header",
+                  APIKey.presented(headers: ["authorization": "Bearer cp-abc"]) == "cp-abc")
+            check("token header",
+                  APIKey.presented(headers: ["authorization": "Token cp-abc"]) == "cp-abc")
+            check("bare authorization value",
+                  APIKey.presented(headers: ["authorization": "cp-abc"]) == "cp-abc")
+            check("x-api-key header",
+                  APIKey.presented(headers: ["x-api-key": "cp-abc"]) == "cp-abc")
+            check("websocket subprotocol",
+                  APIKey.presented(headers: ["sec-websocket-protocol": "token, cp-abc"]) == "cp-abc")
+            check("query token",
+                  APIKey.presented(headers: [:], query: ["token": "cp-abc"]) == "cp-abc")
+            check("no credential", APIKey.presented(headers: [:]) == nil)
+            check("unknown scheme ignored",
+                  APIKey.presented(headers: ["authorization": "Basic cp-abc"]) == nil)
+
+            check("correct key accepted", APIKey.accepts("cp-abc", required: "cp-abc"))
+            check("wrong key rejected", !APIKey.accepts("cp-xyz", required: "cp-abc"))
+            check("missing key rejected", !APIKey.accepts(nil, required: "cp-abc"))
+            check("prefix of key rejected", !APIKey.accepts("cp-ab", required: "cp-abc"))
+            check("empty requirement disables auth", APIKey.accepts(nil, required: ""))
+            check("nil requirement disables auth", APIKey.accepts(nil, required: nil))
+
+            let generated = APIKey.generate()
+            check("generated key is prefixed", generated.hasPrefix("cp-"))
+            check("generated key is long enough", generated.count >= 32)
+            check("generated keys differ", APIKey.generate() != APIKey.generate())
+
+            check("scopes are distinct", Set(APIKeyScope.allCases.map(\.rawValue)).count == 3)
+        }
+
+        print("ProxySelfTest — opt-in defaults")
+
+        check("Claude endpoint starts disabled", !ChatEndpoint().autoStart)
+        check("Codex endpoint starts disabled", !ChatEndpoint(port: ChatBackend.codex.defaultPort).autoStart)
+        check("Voice endpoint starts disabled", !VoiceEndpoint().autoStart)
+
+        print("ProxySelfTest — tool-aware streaming")
+
+        check("plain text streams immediately",
+              ToolStreamClassifier.classify("Hello") == .text)
+        check("leading whitespace waits for a decision",
+              ToolStreamClassifier.classify("  \n") == .undecided)
+        check("JSON tool envelope stays buffered",
+              ToolStreamClassifier.classify(#" {"tool_calls":[]}"#) == .toolCandidate)
+        check("fenced tool envelope stays buffered",
+              ToolStreamClassifier.classify("```json\n{") == .toolCandidate)
+
+        print("ProxySelfTest — provider routing")
+
+        do {
+            check("Claude aliases route to Claude",
+                  ChatModel.sonnet.backend == .claude && ChatModel.opus.backend == .claude)
+            check("GPT aliases route to Codex",
+                  ChatModel.gpt56.backend == .codex && ChatModel.gpt56Terra.backend == .codex)
+            check("model owners match providers",
+                  ChatModel.haiku.owner == "anthropic" && ChatModel.gpt56Luna.owner == "openai")
+            check("all advertised ids round-trip",
+                  ChatModel.allowedIDs.allSatisfy { ChatModel(rawValue: $0) != nil })
+            check("provider model lists do not overlap",
+                  Set(ChatBackend.claude.allowedIDs).isDisjoint(with: Set(ChatBackend.codex.allowedIDs)))
+            let codexRequest = try? JSONDecoder().decode(ChatCompletionRequest.self, from:
+                Data(#"{"model":"sonnet","messages":[{"role":"user","content":"hi"}]}"#.utf8))
+            let rejectsClaude: Bool
+            do {
+                try codexRequest?.validate(allowedModels: ChatBackend.codex.allowedIDs)
+                rejectsClaude = false
+            } catch { rejectsClaude = true }
+            check("Codex endpoint rejects Claude models", rejectsClaude)
+
+            let delta = #"{"method":"item/agentMessage/delta","params":{"itemId":"answer","delta":"hello","threadId":"t","turnId":"u"}}"#
+            check("Codex final delta accepted",
+                  CodexBackend.delta(fromLine: delta, acceptedItemIDs: ["answer"]) == "hello")
+            check("Codex unknown delta ignored",
+                  CodexBackend.delta(fromLine: delta, acceptedItemIDs: []) == nil)
+
+            let config = CodexBackend.isolatedConfig()
+            let profileName = config["default_permissions"] as? String
+            let profiles = config["permissions"] as? [String: Any]
+            let profile = profiles?[profileName ?? ""] as? [String: Any]
+            let filesystem = profile?["filesystem"] as? [String: Any]
+            let network = profile?["network"] as? [String: Any]
+            check("Codex permission profile selected", profileName == "claude_proxy")
+            check("Codex filesystem grants are empty", filesystem?.isEmpty == true)
+            check("Codex command network disabled", network?["enabled"] as? Bool == false)
+            check("Codex agents disabled",
+                  (config["agents"] as? [String: Any])?["enabled"] as? Bool == false)
+            check("Codex hosted web search enabled", config["web_search"] as? String == "live")
+            check("Codex shell implementations disabled",
+                  Set(CodexBackend.disabledFeatureArguments).isSuperset(of: ["shell_tool", "unified_exec"]))
+        }
+
+        print("ProxySelfTest — shared OpenAI wire format")
+
+        // Claude and Codex both terminate at ChatStreamResult; these are the
+        // single shared encoders used after that boundary. Assert the actual
+        // JSON keys/types so neither provider can silently drift in wire shape.
+        do {
+            let textResponse = ChatCompletionResponse(
+                id: "chatcmpl-test", created: 1, model: "model-test",
+                choices: [.init(message: .init(content: "hello", tool_calls: nil),
+                                finish_reason: "stop")]
+            )
+            let textData = try? JSONEncoder().encode(textResponse)
+            let text = textData.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+            }
+            let textChoice = (text?["choices"] as? [[String: Any]])?.first
+            let textMessage = textChoice?["message"] as? [String: Any]
+            check("completion envelope",
+                  text?["object"] as? String == "chat.completion"
+                  && text?["id"] as? String == "chatcmpl-test"
+                  && text?["created"] as? Int == 1
+                  && text?["model"] as? String == "model-test")
+            check("completion assistant message",
+                  textChoice?["index"] as? Int == 0
+                  && textChoice?["finish_reason"] as? String == "stop"
+                  && textMessage?["role"] as? String == "assistant"
+                  && textMessage?["content"] as? String == "hello")
+
+            let call = ToolCall(id: "call_test", name: "lookup",
+                                arguments: #"{"query":"x"}"#)
+            let toolResponse = ChatCompletionResponse(
+                id: "chatcmpl-tool", created: 2, model: "model-test",
+                choices: [.init(message: .init(content: nil, tool_calls: [call]),
+                                finish_reason: "tool_calls")]
+            )
+            let toolData = try? JSONEncoder().encode(toolResponse)
+            let tool = toolData.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+            }
+            let toolChoice = (tool?["choices"] as? [[String: Any]])?.first
+            let toolMessage = toolChoice?["message"] as? [String: Any]
+            let toolCall = (toolMessage?["tool_calls"] as? [[String: Any]])?.first
+            let function = toolCall?["function"] as? [String: Any]
+            check("tool-call response shape",
+                  toolChoice?["finish_reason"] as? String == "tool_calls"
+                  && toolMessage?["content"] is NSNull
+                  && toolCall?["id"] as? String == "call_test"
+                  && toolCall?["type"] as? String == "function"
+                  && function?["name"] as? String == "lookup"
+                  && function?["arguments"] as? String == #"{"query":"x"}"#)
+
+            let chunk = ChatCompletionChunk(
+                id: "chatcmpl-stream", created: 3, model: "model-test",
+                choices: [.init(delta: .init(role: "assistant", content: "hi"),
+                                finish_reason: nil)]
+            )
+            let chunkData = try? JSONEncoder().encode(chunk)
+            let streamed = chunkData.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+            }
+            let streamChoice = (streamed?["choices"] as? [[String: Any]])?.first
+            let deltaObject = streamChoice?["delta"] as? [String: Any]
+            check("stream chunk shape",
+                  streamed?["object"] as? String == "chat.completion.chunk"
+                  && streamChoice?["index"] as? Int == 0
+                  && deltaObject?["role"] as? String == "assistant"
+                  && deltaObject?["content"] as? String == "hi"
+                  && streamChoice?["finish_reason"] is NSNull)
+
+            let errorData = try? JSONEncoder().encode(OpenAIError("bad", type: "proxy_error"))
+            let errorObject = errorData.flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+            }?["error"] as? [String: Any]
+            check("error envelope",
+                  errorObject?["message"] as? String == "bad"
+                  && errorObject?["type"] as? String == "proxy_error")
+        }
+
         print("ProxySelfTest — permission configuration")
 
         // The live suite proves these hold against the real CLI; these catch a

@@ -10,6 +10,42 @@ if CommandLine.arguments.contains("--selftest") {
     exit(passed ? 0 : 1)
 }
 
+// `--codex-probe [model]`: exercise the real Codex app-server bridge without
+// starting HTTP or reading the proxy API key from Keychain. This gives release
+// checks a narrow end-to-end path through the locally signed-in Codex runtime.
+if let flag = CommandLine.arguments.firstIndex(of: "--codex-probe") {
+    let model = CommandLine.arguments.count > flag + 1
+        ? CommandLine.arguments[flag + 1]
+        : ChatModel.gpt56Luna.rawValue
+    let count = CommandLine.arguments.count > flag + 2
+        ? max(1, Int(CommandLine.arguments[flag + 2]) ?? 1)
+        : 1
+    let requestData = try JSONSerialization.data(withJSONObject: [
+        "model": model,
+        "messages": [["role": "user", "content": "Reply with exactly CODEX_PROXY_OK"]]
+    ])
+    let request = try JSONDecoder().decode(ChatCompletionRequest.self, from: requestData)
+    try request.validate(allowedModels: ChatBackend.codex.allowedIDs)
+
+    Task {
+        do {
+            for _ in 0..<count {
+                let result = try CodexBackend.stream(model: model, messages: request.messages)
+                for try await delta in result.deltas {
+                    FileHandle.standardOutput.write(Data(delta.utf8))
+                }
+                FileHandle.standardOutput.write(Data("\n".utf8))
+            }
+            CodexBackend.shutdown()
+            exit(0)
+        } catch {
+            FileHandle.standardError.write(Data("Codex probe failed: \(error.localizedDescription)\n".utf8))
+            exit(1)
+        }
+    }
+    dispatchMain()
+}
+
 // `--voice-client <ws-url> <pcm-file>`: stream a raw linear16 PCM file to a
 // running voice server and print the transcripts. Exercises the endpoint
 // end-to-end against the real Claude backend without the menu-bar UI.
@@ -37,15 +73,47 @@ if let flag = CommandLine.arguments.firstIndex(of: "--voice-server") {
     dispatchMain()
 }
 
+// `--print-api-key`: print the endpoint key and exit. The Keychain item belongs
+// to this app, so the `security` CLI cannot read it without a prompt; scripts and
+// headless clients need a way to ask the owner for it.
+if let flag = CommandLine.arguments.firstIndex(of: "--print-api-key") {
+    let name = CommandLine.arguments.count > flag + 1 ? CommandLine.arguments[flag + 1] : "claude"
+    guard let scope = APIKeyScope(rawValue: name) else {
+        print("usage: --print-api-key [claude|codex|voice]")
+        exit(2)
+    }
+    switch APIKey.state(scope) {
+    case .required(let key):
+        print(key)
+        exit(0)
+    case .disabled:
+        print("")
+        exit(0)
+    case .unavailable(let reason):
+        FileHandle.standardError.write(Data("Could not read \(scope.label) API key: \(reason)\n".utf8))
+        exit(1)
+    }
+}
+
 // `--chat-server [port]`: run only the Chat HTTP server, with no menu-bar UI —
 // the counterpart to `--voice-server`, for exercising the endpoint from a script.
-if let flag = CommandLine.arguments.firstIndex(of: "--chat-server") {
+if let flag = CommandLine.arguments.firstIndex(where: { $0 == "--claude-server" || $0 == "--chat-server" }) {
     let port = CommandLine.arguments.count > flag + 1
         ? Int(CommandLine.arguments[flag + 1]) ?? 8787
         : 8787
-    let server = ProxyServer(endpoint: ChatEndpoint(port: port)) { status in
-        print("chat server: \(status)")
+    let server = ProxyServer(endpoint: ChatEndpoint(port: port), backend: .claude) { status in
+        print("claude server: \(status)")
     }
+    server.start()
+    dispatchMain()
+}
+
+if let flag = CommandLine.arguments.firstIndex(of: "--codex-server") {
+    let port = CommandLine.arguments.count > flag + 1 ? Int(CommandLine.arguments[flag + 1]) ?? 8788 : 8788
+    let server = ProxyServer(endpoint: ChatEndpoint(port: port), backend: .codex) { status in
+        print("codex server: \(status)")
+    }
+    try? CodexBackend.prepare()
     server.start()
     dispatchMain()
 }

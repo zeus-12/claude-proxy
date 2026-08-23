@@ -134,6 +134,18 @@ private final class VoiceUpgrade {
 
         let (rawPath, query) = DeepgramListenParams.split(path: request.path)
         VoiceLog.write(tag, "connect \(request.method) \(rawPath)")
+
+        // CORS never applies to WebSockets, so the key is the only thing standing
+        // between this endpoint and any page the user happens to visit. Refused
+        // before the upgrade, so the client sees a plain 401 rather than a socket
+        // that opens and then dies.
+        guard APIKey.accepts(APIKey.presented(headers: request.headers, query: query), for: .voice) else {
+            VoiceLog.write(tag, "rejected: missing or invalid API key")
+            writeHTTPError("Invalid API key. Send it as `Authorization: Token <key>`, "
+                           + "as the `token` query parameter, or as the "
+                           + "`token, <key>` WebSocket subprotocol.", status: 401)
+            return
+        }
         VoiceLog.write(tag, "  query: \(query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
 
         conn.send(content: WebSocketHandshake.response(for: key),
@@ -166,10 +178,11 @@ private final class VoiceUpgrade {
         return trimmed == "/" ? "" : trimmed
     }
 
-    private func writeHTTPError(_ message: String) {
+    private func writeHTTPError(_ message: String, status: Int = 400) {
         let body = Data(message.utf8)
+        let reason = status == 401 ? "Unauthorized" : "Bad Request"
         let head = """
-        HTTP/1.1 400 Bad Request\r
+        HTTP/1.1 \(status) \(reason)\r
         Content-Type: text/plain; charset=utf-8\r
         Content-Length: \(body.count)\r
         Connection: close\r

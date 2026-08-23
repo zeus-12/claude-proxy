@@ -49,8 +49,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claude-proxy-app
-          path: dist/Claude-Proxy-*.zip
+          name: llm-proxy-app
+          path: dist/LLM-Proxy-*.zip
           if-no-files-found: error
 
   publish:
@@ -79,5 +79,5 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/Claude-Proxy-*.zip
+          files: artifacts/**/LLM-Proxy-*.zip
           generate_release_notes: true

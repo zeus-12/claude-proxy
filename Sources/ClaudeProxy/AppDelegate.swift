@@ -5,8 +5,10 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
-    private let chat = ChatController()
+    private let claude = ChatController(backend: .claude)
+    private let codex = ChatController(backend: .codex)
     private let voice = VoiceController()
+    private let apiKey = APIKeyController()
     private var monitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,18 +22,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 340, height: 388)
+        popover.contentSize = NSSize(width: 380, height: 520)
         popover.contentViewController = NSHostingController(
-            rootView: PopoverView()
-                .environmentObject(chat)
+            rootView: PopoverView(claude: claude, codex: codex)
                 .environmentObject(voice)
+                .environmentObject(apiKey)
         )
         // Both endpoints auto-start (if configured) inside their controllers'
         // init — nothing to kick off here.
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        chat.stop()
+        claude.stop()
+        codex.stop()
         voice.stop()
     }
 
@@ -46,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Claude Proxy",
+        appMenu.addItem(withTitle: "Quit LLM Proxy",
                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
@@ -91,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
         image.isTemplate = true   // adapts to light/dark menu bar
-        image.accessibilityDescription = "Claude Proxy"
+        image.accessibilityDescription = "LLM Proxy"
         return image
     }
 

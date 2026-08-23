@@ -20,7 +20,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP="dist/Claude Proxy.app"
+APP="dist/LLM Proxy.app"
 BUNDLE_ID="com.zeus12.claude-proxy"
 LOG="$HOME/Library/Logs/ClaudeProxy/dictation.log"
 
@@ -87,6 +87,8 @@ ensure_signing_identity
 
 echo "==> Quitting running app"
 pkill -9 -f "Claude Proxy" 2>/dev/null || true
+pkill -9 -f "Code Proxy" 2>/dev/null || true
+pkill -9 -f "LLM Proxy" 2>/dev/null || true
 pkill -9 -f ClaudeProxy 2>/dev/null || true
 sleep 1
 

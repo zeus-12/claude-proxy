@@ -31,7 +31,7 @@ final class VoiceController: ObservableObject {
     private var generation = 0
 
     init() {
-        config = Self.load()
+        config = EndpointOptInMigration.voice(Self.load())
         save()
         if config.autoStart { start() }
     }
