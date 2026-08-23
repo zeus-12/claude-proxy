@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 
 PORT="${1:-8765}"
 PHRASE="${2:-the quick brown fox jumps over the lazy dog}"
-BIN=".build/debug/ClaudeProxy"
+BIN=".build/debug/LLMProxy"
 WORK="$(mktemp -d)"
 SERVER_PID=""
 trap '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null; rm -rf "$WORK"' EXIT

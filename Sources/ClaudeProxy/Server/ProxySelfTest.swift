@@ -1,9 +1,26 @@
 import Foundation
 
 /// Framework-free unit checks for request decoding and prompt building, runnable
-/// with `swift run ClaudeProxy --selftest`. Same rationale as `VoiceSelfTest`:
+/// with `swift run LLMProxy --selftest`. Same rationale as `VoiceSelfTest`:
 /// `swift test` needs full Xcode, which the build machine doesn't have.
 enum ProxySelfTest {
+
+    private final class LockedCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+
+        func increment() {
+            lock.lock()
+            count += 1
+            lock.unlock()
+        }
+
+        var value: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return count
+        }
+    }
 
     /// 1×1 transparent PNG.
     private static let pngBase64 =
@@ -202,6 +219,19 @@ enum ProxySelfTest {
         check("Claude endpoint starts disabled", !ChatEndpoint().autoStart)
         check("Codex endpoint starts disabled", !ChatEndpoint(port: ChatBackend.codex.defaultPort).autoStart)
         check("Voice endpoint starts disabled", !VoiceEndpoint().autoStart)
+
+        let startupReads = LockedCounter()
+        let startupState = MainActor.assumeIsolated {
+            APIKeyController(
+                loadState: { _ in
+                    startupReads.increment()
+                    return .required("should-not-load")
+                },
+                authenticationEnabled: { _ in true }
+            ).state(.claude)
+        }
+        check("menu-bar startup defers Keychain reads",
+              startupReads.value == 0 && startupState == .unavailable("Loading key…"))
 
         print("ProxySelfTest — tool-aware streaming")
 

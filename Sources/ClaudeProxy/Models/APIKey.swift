@@ -1,13 +1,13 @@
 import Foundation
 import Security
 
-enum APIKeyState: Equatable {
+enum APIKeyState: Equatable, Sendable {
     case required(String)
     case disabled
     case unavailable(String)
 }
 
-struct APIKeyError: LocalizedError, Equatable {
+struct APIKeyError: LocalizedError, Equatable, Sendable {
     let message: String
     var errorDescription: String? { message }
 }

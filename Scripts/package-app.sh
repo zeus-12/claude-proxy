@@ -14,7 +14,7 @@ set -euo pipefail
 
 VERSION="${1:-0.0.0}"
 APP_NAME="LLM Proxy"
-EXEC_NAME="ClaudeProxy"
+EXEC_NAME="LLMProxy"
 BUNDLE_ID="com.zeus12.claude-proxy"
 ICON_SRC="Assets/AppIcon-1024.png"
 

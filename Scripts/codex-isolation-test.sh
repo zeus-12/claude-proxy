@@ -55,7 +55,7 @@ body() {
 
 echo "Building…"
 swift build >/dev/null || exit 1
-./.build/debug/ClaudeProxy --codex-server "$PORT" >"$SERVER_LOG" 2>&1 &
+./.build/debug/LLMProxy --codex-server "$PORT" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
     curl -s --max-time 1 "http://127.0.0.1:$PORT/health" >/dev/null && break

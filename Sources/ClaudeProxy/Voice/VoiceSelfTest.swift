@@ -1,7 +1,7 @@
 import Foundation
 
 /// Framework-free unit checks for the voice logic, runnable with
-/// `swift run ClaudeProxy --selftest` (or `./Scripts/dev.sh --selftest`).
+/// `swift run LLMProxy --selftest` (or `./Scripts/dev.sh --selftest`).
 ///
 /// Why not XCTest/swift-testing: both require full Xcode, which the build machine
 /// doesn't have, so `swift test` can't run here. This runs anywhere the app

@@ -1,7 +1,7 @@
 import Foundation
 
 /// A trace log for the voice path, written to
-/// `~/Library/Logs/ClaudeProxy/voice-trace.log`.
+/// `~/Library/Logs/LLMProxy/voice-trace.log`.
 ///
 /// Exists because the interesting failures here are timing- and
 /// interleaving-shaped — how many connections a client opens, what audio format
@@ -11,14 +11,14 @@ import Foundation
 /// It records transcript text, so it contains whatever was said. The file is
 /// truncated on every app launch and never leaves the machine, but delete it
 /// when you are done debugging if that matters:
-///     rm ~/Library/Logs/ClaudeProxy/voice-trace.log
+///     rm ~/Library/Logs/LLMProxy/voice-trace.log
 enum VoiceLog {
     private static let lock = NSLock()
     private static let started = Date()
 
     static let url: URL = {
         let directory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/ClaudeProxy", isDirectory: true)
+            .appendingPathComponent("Library/Logs/LLMProxy", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("voice-trace.log")
     }()

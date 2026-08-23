@@ -93,7 +93,7 @@ You only have to do this once, right after installing (or after each update).
 
 ```bash
 swift build -c release
-./.build/release/ClaudeProxy &
+./.build/release/LLMProxy &
 ```
 
 Or for development:
@@ -106,7 +106,7 @@ It launches as a **menu-bar app** — no Dock icon, no window. Click the icon in
 menu bar to start, stop, configure, or open help for each endpoint.
 All endpoints and their optional API-key authentication start off disabled.
 
-To stop it: `pkill -f ClaudeProxy`.
+To stop it: `pkill -f LLMProxy`.
 
 ## Point an app at it
 

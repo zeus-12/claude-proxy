@@ -6,8 +6,56 @@ final class APIKeyController: ObservableObject {
     @Published private(set) var states: [APIKeyScope: APIKeyState] = [:]
     @Published private(set) var errors: [APIKeyScope: String] = [:]
 
-    init() {
-        for scope in APIKeyScope.allCases { refresh(scope) }
+    private let loadState: @Sendable (APIKeyScope) -> APIKeyState
+    private let authenticationEnabled: @Sendable (APIKeyScope) -> Bool
+    private var hasStartedLoading = false
+
+    init(
+        loadState: @escaping @Sendable (APIKeyScope) -> APIKeyState = { APIKey.state($0) },
+        authenticationEnabled: @escaping @Sendable (APIKeyScope) -> Bool = {
+            APIKey.isAuthenticationEnabled($0)
+        }
+    ) {
+        self.loadState = loadState
+        self.authenticationEnabled = authenticationEnabled
+
+        // AppDelegate owns this controller before NSApplication finishes
+        // launching. Never read Keychain here: SecItemCopyMatching may wait for
+        // a macOS approval prompt, which used to block creation of the status
+        // item and leave an apparently headless process running forever.
+        for scope in APIKeyScope.allCases {
+            states[scope] = authenticationEnabled(scope)
+                ? .unavailable("Loading key…")
+                : .disabled
+        }
+    }
+
+    /// Resolve enabled keys only after the menu-bar item exists. Security calls
+    /// run off the main actor so a Keychain approval prompt cannot freeze AppKit.
+    func loadEnabledKeys() {
+        guard !hasStartedLoading else { return }
+        hasStartedLoading = true
+
+        for scope in APIKeyScope.allCases where authenticationEnabled(scope) {
+            let loadState = self.loadState
+            Task { @MainActor [weak self] in
+                let loaded = await Task.detached(priority: .utility) {
+                    loadState(scope)
+                }.value
+                guard let self else { return }
+                if self.authenticationEnabled(scope) {
+                    self.states[scope] = loaded
+                    if case .unavailable(let reason) = loaded {
+                        self.errors[scope] = reason
+                    } else {
+                        self.errors[scope] = nil
+                    }
+                } else {
+                    self.states[scope] = .disabled
+                    self.errors[scope] = nil
+                }
+            }
+        }
     }
 
     func state(_ scope: APIKeyScope) -> APIKeyState {
@@ -25,7 +73,7 @@ final class APIKeyController: ObservableObject {
     }
 
     func isEnabled(_ scope: APIKeyScope) -> Bool {
-        APIKey.isAuthenticationEnabled(scope)
+        authenticationEnabled(scope)
     }
 
     func masked(_ scope: APIKeyScope) -> String {

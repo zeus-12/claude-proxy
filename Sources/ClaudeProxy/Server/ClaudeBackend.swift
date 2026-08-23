@@ -65,7 +65,7 @@ enum ClaudeBackend {
     /// The CLI resolves `@name` against its working directory, so it runs in an
     /// empty scratch directory rather than wherever the app was launched from.
     private static func workingDirectory() -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ClaudeProxy-scratch", isDirectory: true)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("LLMProxy-scratch", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

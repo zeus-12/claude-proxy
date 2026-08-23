@@ -169,7 +169,7 @@ enum DeepgramProtocol {
             "type": "Error",
             "error_code": code.map { $0 as Any } ?? NSNull(),
             "error_message": message,
-            "provider": "claude-proxy",
+            "provider": "llm-proxy",
         ])
     }
 
@@ -187,7 +187,7 @@ enum DeepgramProtocol {
     private static func encode(_ object: [String: Any]) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8) else {
-            return #"{"type":"Error","error_code":null,"error_message":"Failed to encode response","provider":"claude-proxy"}"#
+            return #"{"type":"Error","error_code":null,"error_message":"Failed to encode response","provider":"llm-proxy"}"#
         }
         return text
     }

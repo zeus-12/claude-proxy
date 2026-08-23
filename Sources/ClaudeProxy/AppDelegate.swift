@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(voice)
                 .environmentObject(apiKey)
         )
+        apiKey.loadEnabledKeys()
         // Both endpoints auto-start (if configured) inside their controllers'
         // init — nothing to kick off here.
     }

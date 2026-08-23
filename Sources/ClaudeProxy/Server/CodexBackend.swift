@@ -232,7 +232,7 @@ enum CodexBackend {
 
     fileprivate static func makeScratchDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ClaudeProxy-codex-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("LLMProxy-codex-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

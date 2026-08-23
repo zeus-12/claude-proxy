@@ -2,16 +2,16 @@
 import PackageDescription
 
 let package = Package(
-    name: "claude-proxy",
+    name: "llm-proxy",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "ClaudeProxy", targets: ["ClaudeProxy"])
+        .executable(name: "LLMProxy", targets: ["LLMProxy"])
     ],
     targets: [
         .executableTarget(
-            name: "ClaudeProxy",
+            name: "LLMProxy",
             path: "Sources/ClaudeProxy"
         )
     ]
