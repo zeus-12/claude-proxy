@@ -52,6 +52,11 @@ final class VoiceController: ObservableObject {
 
     func start() {
         wantsRunning = true
+        guard APIKey.isConfigured(.voice) else {
+            running = false
+            error = "Set an access key in Settings first"
+            return
+        }
         // Not `guard server == nil`: a server that failed to bind is still a
         // live object, and refusing to replace it made every retry a no-op
         // until the app was relaunched.

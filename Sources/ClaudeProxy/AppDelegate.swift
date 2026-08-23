@@ -9,7 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let codex = ChatController(backend: .codex)
     private let voice = VoiceController()
     private let apiKey = APIKeyController()
-    private var monitor: Any?
+    private var settingsWindow: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
@@ -21,16 +21,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
 
+        let settingsWindow = SettingsWindowController(
+            claude: claude,
+            codex: codex,
+            voice: voice,
+            apiKey: apiKey
+        )
+        self.settingsWindow = settingsWindow
+
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 380, height: 520)
+        popover.contentSize = NSSize(width: 400, height: 500)
         popover.contentViewController = NSHostingController(
-            rootView: PopoverView(claude: claude, codex: codex)
+            rootView: PopoverView(
+                claude: claude,
+                codex: codex,
+                onOpenSettings: { [weak self] tab in self?.openSettings(tab) }
+            )
                 .environmentObject(voice)
                 .environmentObject(apiKey)
         )
-        apiKey.loadEnabledKeys()
         // Both endpoints auto-start (if configured) inside their controllers'
         // init — nothing to kick off here.
+
+        // Small launch hook used by the UI smoke test. It also makes Settings
+        // directly reachable from Terminal when diagnosing a menu-bar issue.
+        if CommandLine.arguments.contains("--open-settings") {
+            let tab = CommandLine.arguments
+                .first(where: { $0.hasPrefix("--settings-tab=") })
+                .flatMap { SettingsTab(rawValue: String($0.dropFirst("--settings-tab=".count))) }
+                ?? .claude
+            openSettings(tab)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -107,5 +128,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
+    }
+
+    private func openSettings(_ tab: SettingsTab) {
+        popover.performClose(nil)
+        settingsWindow?.show(tab: tab)
     }
 }

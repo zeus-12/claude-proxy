@@ -10,6 +10,7 @@ FIXTURES=$(mktemp -d)
 SERVER_LOG="$FIXTURES/server.log"
 PASS=0
 FAIL=0
+ACCESS_KEY="llmp-codex-isolation"
 
 cleanup() {
     [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
@@ -28,6 +29,7 @@ record() {
 ask() {
     curl -sS --max-time 300 -X POST "$URL" \
         -H 'content-type: application/json' \
+        -H "Authorization: Bearer $ACCESS_KEY" \
         -d "$1"
 }
 
@@ -55,7 +57,7 @@ body() {
 
 echo "Building…"
 swift build >/dev/null || exit 1
-./.build/debug/LLMProxy --codex-server "$PORT" >"$SERVER_LOG" 2>&1 &
+LLM_PROXY_ACCESS_KEY_CODEX="$ACCESS_KEY" ./.build/debug/LLMProxy --codex-server "$PORT" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 30); do
     curl -s --max-time 1 "http://127.0.0.1:$PORT/health" >/dev/null && break
@@ -69,7 +71,11 @@ HEALTH=$(curl -s "http://127.0.0.1:$PORT/health")
 record "advertises Codex only" "$([[ "$HEALTH" == *'"provider":"codex"'* && "$HEALTH" != *'sonnet'* ]] && echo 1 || echo 0)" "$HEALTH"
 
 NO_KEY=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/v1/models")
-record "authentication is opt-in" "$([[ "$NO_KEY" == 200 ]] && echo 1 || echo 0)" "HTTP $NO_KEY"
+record "missing access key is rejected" "$([[ "$NO_KEY" == 401 ]] && echo 1 || echo 0)" "HTTP $NO_KEY"
+WITH_KEY=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ACCESS_KEY" "http://127.0.0.1:$PORT/v1/models")
+record "configured access key is accepted" "$([[ "$WITH_KEY" == 200 ]] && echo 1 || echo 0)" "HTTP $WITH_KEY"
+WRONG_KEY=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' "http://127.0.0.1:$PORT/v1/models")
+record "wrong access key is rejected" "$([[ "$WRONG_KEY" == 401 ]] && echo 1 || echo 0)" "HTTP $WRONG_KEY"
 
 PLAIN_RAW=$(ask "$(body 'Reply with exactly CODEX_CHAT_OK')")
 record "OpenAI completion wire shape" "$(printf '%s' "$PLAIN_RAW" | valid_completion_shape && echo 1 || echo 0)" "$PLAIN_RAW"
@@ -78,6 +84,7 @@ record "plain chat" "$([[ "$PLAIN" == *CODEX_CHAT_OK* ]] && echo 1 || echo 0)" "
 
 STREAM=$(curl -sN --max-time 300 -X POST "$URL" \
     -H 'content-type: application/json' \
+    -H "Authorization: Bearer $ACCESS_KEY" \
     -d '{"model":"gpt-5.6-luna","stream":true,"messages":[{"role":"user","content":"Reply with exactly STREAM_OK. Do not call a tool."}],"tools":[{"type":"function","function":{"name":"irrelevant_lookup","description":"Never use for this task","parameters":{"type":"object","properties":{}}}}]}')
 STREAM_OK=$(printf '%s' "$STREAM" | python3 -c 'import json,sys
 lines=[x[6:] for x in sys.stdin.read().splitlines() if x.startswith("data: ")]

@@ -5,7 +5,7 @@
 A menu-bar-only macOS app that exposes separate OpenAI-compatible endpoints for
 your Claude Code and Codex subscriptions.
 
-LLM Proxy gives each sign-in its own local API, switch, optional key, settings, and
+LLM Proxy gives each sign-in its own local API, switch, access key, settings, and
 help page. Claude defaults to `http://127.0.0.1:8787/v1`; Codex defaults to
 `http://127.0.0.1:8788/v1`. Paste the provider URL into any app that supports a
 custom OpenAI endpoint.
@@ -104,7 +104,8 @@ swift run
 
 It launches as a **menu-bar app** — no Dock icon, no window. Click the icon in the
 menu bar to start, stop, configure, or open help for each endpoint.
-All endpoints and their optional API-key authentication start off disabled.
+All endpoints start off disabled. Create a separate local access key in Settings
+before starting each endpoint.
 
 To stop it: `pkill -f LLMProxy`.
 
@@ -112,21 +113,21 @@ To stop it: `pkill -f LLMProxy`.
 
 In any OpenAI-compatible client, choose one provider:
 
-| Provider | Base URL | API key | Models |
+| Provider | Base URL | Access key | Models |
 | --- | --- | --- | --- |
-| Claude | `http://127.0.0.1:8787/v1` | Optional Claude key | `sonnet`, `opus`, `haiku` |
-| Codex | `http://127.0.0.1:8788/v1` | Optional Codex key | supported GPT-5.6 ids |
+| Claude | `http://127.0.0.1:8787/v1` | Required Claude key | `sonnet`, `opus`, `haiku` |
+| Codex | `http://127.0.0.1:8788/v1` | Required Codex key | supported GPT-5.6 ids |
 
 ### Try it with curl
 
-Turn on the endpoint in the menu first. Authentication is optional unless you
-enable **Require an API key** for that endpoint.
+Create the endpoint's local access key in Settings, then turn on the endpoint.
 
 Claude, non-streaming:
 
 ```bash
 curl http://127.0.0.1:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <access-key>' \
   -d '{
     "model": "sonnet",
     "messages": [{"role": "user", "content": "Give me three names for a coffee shop."}]
@@ -138,6 +139,7 @@ Codex, streaming (SSE):
 ```bash
 curl -N http://127.0.0.1:8788/v1/chat/completions \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <access-key>' \
   -d '{
     "model": "gpt-5.6-luna",
     "stream": true,
@@ -154,8 +156,8 @@ with `http --stream`.
 The server binds to `127.0.0.1` only. To reach it from another device or a hosted
 app, run a local tunnel — it runs on your Mac and forwards to the port:
 
-Before opening a tunnel, turn on **Require an API key** for that endpoint. With
-authentication off, any client that can reach the tunnel can use your subscription.
+Every endpoint requires its own access key. Keep that key private when you expose
+an endpoint through a tunnel.
 
 ```bash
 ngrok http 8787

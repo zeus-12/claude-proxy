@@ -60,18 +60,19 @@ enum APIDocs {
             option. If you are calling it by hand, the full chat endpoint is \
             `POST \(baseURL)/chat/completions`.
 
-            Authentication is off by default. If you turn on **Require an API key** \
-            under \(backend.title), send that endpoint's key as \
-            `Authorization: Bearer <key>` (or `x-api-key`). Enabling it stores the \
-            key in Keychain; Claude, Codex and Voice are configured separately.
+            An access key is required before this endpoint can run. Create or \
+            paste one under \(backend.title), then send it as \
+            `Authorization: Bearer <access-key>` (or `x-api-key`). This is a local \
+            proxy key—not your provider credential—and Claude, Codex and Voice \
+            each use a separate key.
             """,
             entries: [
                 Entry(title: "Base URL",
-                      detail: "Point any OpenAI-compatible client here. Authentication is optional and configured under \(backend.title).",
+                      detail: "Point any OpenAI-compatible client here. Create the required local access key under \(backend.title) first.",
                       code: baseURL),
-                Entry(title: "API key",
-                      detail: "Optional. Turn on Require an API key under \(backend.title), then copy its separate key here.",
-                      code: "Authorization: Bearer <key>"),
+                Entry(title: "Access key",
+                      detail: "Required and separate from your provider sign-in. Copy the \(backend.title) access key from Settings.",
+                      code: "Authorization: Bearer <access-key>"),
                 Entry(title: "Chat completions",
                       detail: "OpenAI Chat Completions. Send `messages`; get a `chat.completion` back.",
                       code: "POST \(baseURL)/chat/completions"),
@@ -108,6 +109,7 @@ enum APIDocs {
                 ```bash
                 curl \(baseURL)/chat/completions \\
                   -H "Content-Type: application/json" \\
+                  -H "Authorization: Bearer <access-key>" \\
                   -d '{
                     "model": "\(defaultModel)",
                     "messages": [{"role": "user", "content": "Hello!"}]
@@ -118,6 +120,7 @@ enum APIDocs {
                 ```bash
                 curl -N \(baseURL)/chat/completions \\
                   -H "Content-Type: application/json" \\
+                  -H "Authorization: Bearer <access-key>" \\
                   -d '{
                     "model": "\(defaultModel)",
                     "stream": true,
@@ -129,6 +132,7 @@ enum APIDocs {
                 ```bash
                 curl \(baseURL)/chat/completions \\
                   -H "Content-Type: application/json" \\
+                  -H "Authorization: Bearer <access-key>" \\
                   -d '{
                     "model": "\(defaultModel)",
                     "messages": [{"role": "user", "content": [
@@ -142,8 +146,7 @@ enum APIDocs {
                 ```python
                 from openai import OpenAI
 
-                # Use the endpoint key instead if authentication is enabled.
-                client = OpenAI(base_url="\(baseURL)", api_key="not-needed")
+                client = OpenAI(base_url="\(baseURL)", api_key="<access-key>")
 
                 response = client.chat.completions.create(
                     model="\(defaultModel)",
@@ -158,8 +161,7 @@ enum APIDocs {
 
                 const client = new OpenAI({
                   baseURL: "\(baseURL)",
-                  // Use the endpoint key instead if authentication is enabled.
-                  apiKey: "not-needed",
+                  apiKey: "<access-key>",
                 });
 
                 const response = await client.chat.completions.create({
@@ -172,9 +174,9 @@ enum APIDocs {
                 Example(title: "Errors", body: """
                 Errors use OpenAI's shape: `{ "error": { "message": ..., "type": ... } }`.
 
-                - `401` — authentication is enabled and the API key is missing or \
-                wrong. Copy the \(backend.title) key from the app and send it as \
-                `Authorization: Bearer <key>`.
+                - `401` — the access key is missing or wrong. Copy the \
+                \(backend.title) key from Settings and send it as \
+                `Authorization: Bearer <access-key>`.
                 - `400` — `model` missing or not in (\(models)); `messages` empty; a \
                 message has an unknown `role`; a `role: "tool"` message is missing \
                 `tool_call_id`; an image has an unsupported media type, invalid \
@@ -208,10 +210,10 @@ enum APIDocs {
             - **Legacy** (`/`) — the original minimal protocol, still used by the \
             TypeWhisper plugin.
 
-            Authentication is off by default. If you turn on **Require an API \
-            key** under Voice, send its key as \
-            `Authorization: Token <key>`, as `?token=<key>`, or as the \
-            `token, <key>` WebSocket subprotocol — browser clients cannot set \
+            An access key is required before Voice can run. Create or paste one \
+            under Voice, then send it as `Authorization: Token <access-key>`, as \
+            `?token=<access-key>`, or as the `token, <access-key>` WebSocket \
+            subprotocol — browser clients cannot set \
             headers, so the last two exist for them. The key is in the app under \
             Voice, and is separate from the Claude and Codex keys.
 
@@ -222,9 +224,9 @@ enum APIDocs {
                 Entry(title: "Base URL (Deepgram clients)",
                       detail: "Configure this as the API base. Clients append `/listen` themselves, giving `\(baseURL)/listen`.",
                       code: baseURL),
-                Entry(title: "API key",
-                      detail: "Optional and separate from the Claude and Codex keys. Enable it under Voice before configuring clients to send `Authorization: Token …`.",
-                      code: "Authorization: Token <key>   ·   ?token=<key>"),
+                Entry(title: "Access key",
+                      detail: "Required and separate from the Claude and Codex keys. Copy it from Voice Settings.",
+                      code: "Authorization: Token <access-key>   ·   ?token=<access-key>"),
                 Entry(title: "WebSocket URL",
                       detail: "The full Deepgram route, if you are connecting by hand. `\(endpointURL)/listen` also works.",
                       code: "\(endpointURL)/v1/listen"),
@@ -281,6 +283,7 @@ enum APIDocs {
                   -H "Upgrade: websocket" \\
                   -H "Sec-WebSocket-Version: 13" \\
                   -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \\
+                  -H "Authorization: Token <access-key>" \\
                   "\(baseURL)/listen?encoding=linear16&sample_rate=16000"
                 ```
 
@@ -290,7 +293,7 @@ enum APIDocs {
                 ```python
                 import json, websockets
 
-                url = "\(endpointURL)/v1/listen?encoding=linear16&sample_rate=16000&channels=1"
+                url = "\(endpointURL)/v1/listen?encoding=linear16&sample_rate=16000&channels=1&token=<access-key>"
 
                 async with websockets.connect(url) as ws:
                     # Stream interleaved Int16 PCM as binary frames, in real time.
@@ -312,7 +315,7 @@ enum APIDocs {
                 ```python
                 import json, websockets
 
-                async with websockets.connect("\(endpointURL)") as ws:
+                async with websockets.connect("\(endpointURL)?token=<access-key>") as ws:
                     # Stream Int16 PCM @ 16 kHz mono as binary frames.
                     for chunk in pcm_chunks:
                         await ws.send(chunk)
@@ -330,8 +333,8 @@ enum APIDocs {
                 Deepgram-protocol failures arrive as an `Error` message and the \
                 socket closes:
 
-                - When authentication is enabled, a missing or wrong API key — \
-                refused with a 401 before the socket opens, not as an `Error` message.
+                - A missing or wrong access key — refused with a 401 before the \
+                socket opens, not as an `Error` message.
                 - Missing `encoding`, or an `encoding` other than `linear16`.
                 - Missing or invalid `sample_rate`, or `channels` outside 1–8.
                 - An unknown path. Use `/v1/listen` or `/listen` for the Deepgram \
@@ -378,8 +381,7 @@ enum APIDocs {
         LLM Proxy runs local servers on this machine. Chat exposes Claude Code \
         and Codex models through an OpenAI-compatible API; Voice exposes Claude \
         speech-to-text through WebSocket APIs. Both are loopback-only \
-        (`127.0.0.1`). API-key authentication is optional and configured \
-        independently for each endpoint.
+        (`127.0.0.1`). A separate local access key is required for each endpoint.
 
         \(body)
         """

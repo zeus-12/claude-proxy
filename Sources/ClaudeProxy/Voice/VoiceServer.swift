@@ -140,10 +140,10 @@ private final class VoiceUpgrade {
         // before the upgrade, so the client sees a plain 401 rather than a socket
         // that opens and then dies.
         guard APIKey.accepts(APIKey.presented(headers: request.headers, query: query), for: .voice) else {
-            VoiceLog.write(tag, "rejected: missing or invalid API key")
-            writeHTTPError("Invalid API key. Send it as `Authorization: Token <key>`, "
+            VoiceLog.write(tag, "rejected: missing or invalid access key")
+            writeHTTPError("Invalid access key. Send it as `Authorization: Token <access-key>`, "
                            + "as the `token` query parameter, or as the "
-                           + "`token, <key>` WebSocket subprotocol.", status: 401)
+                           + "`token, <access-key>` WebSocket subprotocol.", status: 401)
             return
         }
         VoiceLog.write(tag, "  query: \(query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")

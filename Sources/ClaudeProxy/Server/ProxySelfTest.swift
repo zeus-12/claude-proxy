@@ -180,7 +180,7 @@ enum ProxySelfTest {
                   blankContent.count == 1 && blankContent[0]["type"] as? String == "image")
         }
 
-        print("ProxySelfTest — API key")
+        print("ProxySelfTest — access key")
 
         do {
             check("bearer header",
@@ -203,35 +203,30 @@ enum ProxySelfTest {
             check("wrong key rejected", !APIKey.accepts("cp-xyz", required: "cp-abc"))
             check("missing key rejected", !APIKey.accepts(nil, required: "cp-abc"))
             check("prefix of key rejected", !APIKey.accepts("cp-ab", required: "cp-abc"))
-            check("empty requirement disables auth", APIKey.accepts(nil, required: ""))
-            check("nil requirement disables auth", APIKey.accepts(nil, required: nil))
+            check("empty requirement rejects", !APIKey.accepts(nil, required: ""))
 
             let generated = APIKey.generate()
-            check("generated key is prefixed", generated.hasPrefix("cp-"))
+            check("generated key is prefixed", generated.hasPrefix("llmp-"))
             check("generated key is long enough", generated.count >= 32)
             check("generated keys differ", APIKey.generate() != APIKey.generate())
 
             check("scopes are distinct", Set(APIKeyScope.allCases.map(\.rawValue)).count == 3)
         }
 
-        print("ProxySelfTest — opt-in defaults")
+        print("ProxySelfTest — secure defaults")
 
         check("Claude endpoint starts disabled", !ChatEndpoint().autoStart)
         check("Codex endpoint starts disabled", !ChatEndpoint(port: ChatBackend.codex.defaultPort).autoStart)
         check("Voice endpoint starts disabled", !VoiceEndpoint().autoStart)
 
-        let startupReads = LockedCounter()
-        let startupState = MainActor.assumeIsolated {
+        let startupController = MainActor.assumeIsolated {
             APIKeyController(
-                loadState: { _ in
-                    startupReads.increment()
-                    return .required("should-not-load")
-                },
-                authenticationEnabled: { _ in true }
-            ).state(.claude)
+                loadState: { _ in .disabled }
+            )
         }
-        check("menu-bar startup defers Keychain reads",
-              startupReads.value == 0 && startupState == .unavailable("Loading key…"))
+        check("access keys start unconfigured", MainActor.assumeIsolated {
+            APIKeyScope.allCases.allSatisfy { startupController.state($0) == .disabled }
+        })
 
         print("ProxySelfTest — tool-aware streaming")
 

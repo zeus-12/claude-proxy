@@ -26,10 +26,16 @@ enum APIKeyScope: String, CaseIterable, Sendable {
     }
 }
 
+/// Stores the proxy's local access keys in the app's private Application
+/// Support directory. These are not provider credentials: they only protect a
+/// loopback endpoint (or a tunnel the owner deliberately places in front of it).
+///
+/// Earlier builds used Keychain. A self-signed menu-bar app can trigger a
+/// password dialog merely by reading such an item; macOS then makes that dialog
+/// modal to the app, which made Settings look frozen. File storage with mode
+/// 0600 gives the token the same user-account boundary as the subscriptions it
+/// gates, without any hidden system interaction.
 enum APIKey {
-    private static let service = "ClaudeProxy-api-key"
-    private static let enabledPrefix = "endpointAuthenticationEnabled."
-
     private static let lock = NSLock()
     private static var cached: [APIKeyScope: APIKeyState] = [:]
 
@@ -37,37 +43,31 @@ enum APIKey {
         lock.lock()
         defer { lock.unlock() }
 
-        // Authentication is opt-in. This check deliberately happens before
-        // looking at the cache or Keychain so opening settings never causes a
-        // macOS password prompt for a feature the user has not enabled.
-        guard authenticationEnabled(scope) else {
-            cached[scope] = .disabled
-            return .disabled
+        if let override = ProcessInfo.processInfo.environment[environmentName(for: scope)]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return .required(override)
         }
 
         if let cached = cached[scope] { return cached }
 
         let resolved: APIKeyState
-        var result = read(scope.rawValue)
-        // Preserve the existing combined Chat key as the Claude endpoint key.
-        // Copy it instead of deleting the legacy item so migration is recoverable.
-        if case .absent = result, scope == .claude,
-           case .success(let legacy) = read("chat") {
-            if case .success = write(legacy, scope) { result = .success(legacy) }
-        }
-        switch result {
-        case .success(let stored):
-            resolved = stored.isEmpty ? .disabled : .required(stored)
-        case .absent:
-            let fresh = generate()
-            if case .failure(let error) = write(fresh, scope) {
-                resolved = .unavailable(error.message)
-            } else {
-                resolved = .required(fresh)
+        do {
+            let data = try Data(contentsOf: fileURL(for: scope))
+            guard let value = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else {
+                resolved = .disabled
+                cached[scope] = resolved
+                return resolved
             }
-        case .failure(let reason):
-            resolved = .unavailable(reason)
+            resolved = .required(value)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            resolved = .disabled
+        } catch {
+            resolved = .unavailable("Unable to read the access key. \(error.localizedDescription)")
         }
+
         cached[scope] = resolved
         return resolved
     }
@@ -77,27 +77,8 @@ enum APIKey {
         return nil
     }
 
-    static func isAuthenticationEnabled(_ scope: APIKeyScope) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return authenticationEnabled(scope)
-    }
-
-    @discardableResult
-    static func setAuthenticationEnabled(
-        _ enabled: Bool,
-        for scope: APIKeyScope
-    ) -> Result<Void, APIKeyError> {
-        lock.lock()
-        UserDefaults.standard.set(enabled, forKey: enabledPrefix + scope.rawValue)
-        cached[scope] = enabled ? nil : .disabled
-        lock.unlock()
-
-        guard enabled else { return .success(()) }
-        if case .unavailable(let reason) = state(scope) {
-            return .failure(APIKeyError(message: reason))
-        }
-        return .success(())
+    static func isConfigured(_ scope: APIKeyScope) -> Bool {
+        current(scope) != nil
     }
 
     @discardableResult
@@ -107,18 +88,32 @@ enum APIKey {
 
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            UserDefaults.standard.set(false, forKey: enabledPrefix + scope.rawValue)
-            cached[scope] = .disabled
-            return .success(())
+            return .failure(APIKeyError(message: "Enter an access key or generate one."))
         }
-        switch write(trimmed, scope) {
-        case .success:
-            UserDefaults.standard.set(true, forKey: enabledPrefix + scope.rawValue)
+
+        do {
+            let directory = supportDirectory
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: directory.path
+            )
+            let url = fileURL(for: scope)
+            try Data(trimmed.utf8).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: url.path
+            )
             cached[scope] = .required(trimmed)
             return .success(())
-        case .failure(let error):
-            cached[scope] = .unavailable(error.message)
-            return .failure(error)
+        } catch {
+            let message = "Unable to save the access key. \(error.localizedDescription)"
+            cached[scope] = .unavailable(message)
+            return .failure(APIKeyError(message: message))
         }
     }
 
@@ -135,18 +130,12 @@ enum APIKey {
     }
 
     static func accepts(_ presented: String?, for scope: APIKeyScope) -> Bool {
-        switch state(scope) {
-        case .disabled:
-            return true
-        case .required(let key):
-            return accepts(presented, required: key)
-        case .unavailable:
-            return false
-        }
+        guard case .required(let key) = state(scope) else { return false }
+        return accepts(presented, required: key)
     }
 
-    static func accepts(_ presented: String?, required: String?) -> Bool {
-        guard let required, !required.isEmpty else { return true }
+    static func accepts(_ presented: String?, required: String) -> Bool {
+        guard !required.isEmpty else { return false }
         guard let presented else { return false }
         return constantTimeEquals(presented, required)
     }
@@ -156,87 +145,32 @@ enum APIKey {
         if SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) != errSecSuccess {
             bytes = (0..<24).map { _ in UInt8.random(in: 0...255) }
         }
-        return "cp-" + bytes.map { String(format: "%02x", $0) }.joined()
+        return "llmp-" + bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static var supportDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            // Keep the legacy directory so endpoint settings migrate in place.
+            .appendingPathComponent("ClaudeProxy", isDirectory: true)
+    }
+
+    private static func fileURL(for scope: APIKeyScope) -> URL {
+        supportDirectory.appendingPathComponent("\(scope.rawValue)-access-key")
+    }
+
+    private static func environmentName(for scope: APIKeyScope) -> String {
+        "LLM_PROXY_ACCESS_KEY_\(scope.rawValue.uppercased())"
     }
 
     private static func constantTimeEquals(_ a: String, _ b: String) -> Bool {
         let lhs = Array(a.utf8), rhs = Array(b.utf8)
         var difference = UInt8(lhs.count == rhs.count ? 0 : 1)
-        for i in 0..<max(lhs.count, rhs.count) {
-            difference |= (i < lhs.count ? lhs[i] : 0) ^ (i < rhs.count ? rhs[i] : 0)
+        for index in 0..<max(lhs.count, rhs.count) {
+            difference |= (index < lhs.count ? lhs[index] : 0)
+                ^ (index < rhs.count ? rhs[index] : 0)
         }
         return difference == 0
     }
-
-    private static func authenticationEnabled(_ scope: APIKeyScope) -> Bool {
-        UserDefaults.standard.bool(forKey: enabledPrefix + scope.rawValue)
-    }
-
-    // MARK: - Keychain
-
-    private enum ReadResult {
-        case success(String)
-        case absent
-        case failure(String)
-    }
-
-    private static func read(_ account: String) -> ReadResult {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-
-        switch status {
-        case errSecSuccess:
-            guard let data = item as? Data,
-                  let value = String(data: data, encoding: .utf8) else {
-                return .failure("The stored key is not readable text.")
-            }
-            return .success(value)
-        case errSecItemNotFound:
-            return .absent
-        default:
-            return .failure(describe(status))
-        }
-    }
-
-    private static func write(_ value: String, _ scope: APIKeyScope) -> Result<Void, APIKeyError> {
-        let base: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: scope.rawValue,
-        ]
-        let data = Data(value.utf8)
-
-        let update = SecItemUpdate(base as CFDictionary,
-                                   [kSecValueData as String: data] as CFDictionary)
-        if update == errSecSuccess { return .success(()) }
-        if update != errSecItemNotFound { return .failure(APIKeyError(message: describe(update))) }
-
-        var insert = base
-        insert[kSecValueData as String] = data
-        insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        let add = SecItemAdd(insert as CFDictionary, nil)
-        return add == errSecSuccess ? .success(()) : .failure(APIKeyError(message: describe(add)))
-    }
-
-    private static func describe(_ status: OSStatus) -> String {
-        let detail = SecCopyErrorMessageString(status, nil).map { $0 as String }
-            ?? "Keychain error \(status)"
-        if status == errSecInteractionNotAllowed || status == errSecAuthFailed
-            || status == errSecUserCanceled {
-            return "\(detail) LLM Proxy could not reach its Keychain item — "
-                 + "approve the macOS prompt, or set a key manually."
-        }
-        return detail
-    }
-
-    // MARK: - Presented credentials
 
     static func presented(headers: [String: String], query: [String: String] = [:]) -> String? {
         if let authorization = headers["authorization"] {

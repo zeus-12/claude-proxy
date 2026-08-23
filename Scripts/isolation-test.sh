@@ -21,7 +21,8 @@ PORT="${1:-8801}"
 URL="http://127.0.0.1:$PORT/v1/chat/completions"
 PASS=0; FAIL=0
 FAILED_NAMES=()
-AUTH=()
+ACCESS_KEY="llmp-claude-isolation"
+AUTH=(-H "Authorization: Bearer $ACCESS_KEY")
 
 cleanup() {
     [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null
@@ -102,7 +103,7 @@ verbatim() { # $1 = name, $2 = text to echo back
 echo "Building…"
 swift build 2>&1 | tail -2
 pkill -f "chat-server $PORT" 2>/dev/null; sleep 1
-./.build/debug/LLMProxy --chat-server "$PORT" > /tmp/isolation-test-server.log 2>&1 &
+LLM_PROXY_ACCESS_KEY_CLAUDE="$ACCESS_KEY" ./.build/debug/LLMProxy --chat-server "$PORT" > /tmp/isolation-test-server.log 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 20); do
     sleep 1
@@ -116,7 +117,9 @@ echo "── Authentication ─────────────────�
 code() { curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$@"; }
 record "health needs no key" "$([[ $(code "http://127.0.0.1:$PORT/health") == 200 ]] && echo 1 || echo 0)" "$(code "http://127.0.0.1:$PORT/health")"
 record "preflight needs no key" "$([[ $(code -X OPTIONS "$URL") == 204 ]] && echo 1 || echo 0)" "$(code -X OPTIONS "$URL")"
-record "authentication is opt-in" "$([[ $(code "http://127.0.0.1:$PORT/v1/models") == 200 ]] && echo 1 || echo 0)" "$(code "http://127.0.0.1:$PORT/v1/models")"
+record "models rejects a missing key" "$([[ $(code "http://127.0.0.1:$PORT/v1/models") == 401 ]] && echo 1 || echo 0)" "$(code "http://127.0.0.1:$PORT/v1/models")"
+record "models accepts the configured key" "$([[ $(code -H "Authorization: Bearer $ACCESS_KEY" "http://127.0.0.1:$PORT/v1/models") == 200 ]] && echo 1 || echo 0)" "$(code -H "Authorization: Bearer $ACCESS_KEY" "http://127.0.0.1:$PORT/v1/models")"
+record "models rejects the wrong key" "$([[ $(code -H "Authorization: Bearer wrong" "http://127.0.0.1:$PORT/v1/models") == 401 ]] && echo 1 || echo 0)" "$(code -H "Authorization: Bearer wrong" "http://127.0.0.1:$PORT/v1/models")"
 
 echo
 echo "── File reads ───────────────────────────────────────────────"

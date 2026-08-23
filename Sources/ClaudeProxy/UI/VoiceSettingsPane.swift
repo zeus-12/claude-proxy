@@ -3,10 +3,13 @@ import AppKit
 
 struct VoiceSettingsPane: View {
     @EnvironmentObject var voice: VoiceController
+    @EnvironmentObject private var apiKey: APIKeyController
     @State private var portText = ""
 
     var body: some View {
         Form {
+            APIKeySection(scope: .voice)
+
             Section("Endpoint") {
                 LabeledContent("WebSocket URL") {
                     HStack(spacing: 6) {
@@ -20,12 +23,22 @@ struct VoiceSettingsPane: View {
                     EndpointStatusLabel(status: voice.status)
                 }
                 Toggle(isOn: Binding(get: { voice.isActive }, set: { _ in voice.toggle() })) {
-                    Text(voice.isActive ? "Running" : "Stopped")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Run endpoint")
+                        Text("Accept local speech-to-text WebSocket connections.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .toggleStyle(.switch)
-            }
+                .disabled(!apiKey.isConfigured(.voice))
 
-            APIKeySection(scope: .voice)
+                if !apiKey.isConfigured(.voice) {
+                    Label("Create an access key before starting this endpoint.", systemImage: "key.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
 
             Section {
                 LabeledContent("Port") {
@@ -37,21 +50,30 @@ struct VoiceSettingsPane: View {
                                 let f = new.filter(\.isNumber)
                                 if f != new { portText = f }
                             }
-                        Button("Apply") { applyPort() }
+                        Button("Apply port") { applyPort() }
                             .disabled(!portChanged || !portValid)
                     }
                 }
-                Toggle("Start automatically at launch", isOn: Binding(
+                Toggle(isOn: Binding(
                     get: { voice.config.autoStart },
                     set: { voice.config.autoStart = $0 }
-                ))
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Start at login")
+                        Text("Run this endpoint whenever LLM Proxy launches.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .disabled(!apiKey.isConfigured(.voice))
             } header: {
                 Text("Configuration")
             }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .contentMargins(.top, 0, for: .scrollContent)
+        .contentMargins(.top, 8, for: .scrollContent)
         .onAppear { portText = String(voice.config.port) }
     }
 

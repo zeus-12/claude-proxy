@@ -45,6 +45,7 @@ private struct CopyFlashIcon: View {
 }
 
 /// A borderless button that copies a string to the pasteboard.
+@MainActor
 struct CopyButton: View {
     let value: String
     init(_ value: String) { self.value = value }
@@ -65,6 +66,7 @@ struct CopyButton: View {
 
 /// A labelled button that copies a block of documentation to the pasteboard.
 /// The title never changes — only the icon — so the button keeps its width.
+@MainActor
 struct CopyDocsButton: View {
     let title: String
     /// Built lazily: the docs are only serialized when the user actually clicks.

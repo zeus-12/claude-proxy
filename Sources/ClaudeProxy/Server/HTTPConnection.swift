@@ -84,8 +84,8 @@ final class HTTPConnection {
         let isPublic = request.path == "/" || request.path == "/health"
         if !isPublic, !APIKey.accepts(APIKey.presented(headers: request.headers), for: backend.keyScope) {
             writeError(status: 401,
-                       message: "Invalid API key. Send it as `Authorization: Bearer <key>`; "
-                              + "the key is in LLM Proxy settings.",
+                       message: "Invalid access key. Send it as "
+                              + "`Authorization: Bearer <access-key>`; copy the key from Settings.",
                        type: "invalid_request_error")
             return
         }

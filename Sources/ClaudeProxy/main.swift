@@ -11,7 +11,7 @@ if CommandLine.arguments.contains("--selftest") {
 }
 
 // `--codex-probe [model]`: exercise the real Codex app-server bridge without
-// starting HTTP or reading the proxy API key from Keychain. This gives release
+// starting HTTP or reading the proxy access-key file. This gives release
 // checks a narrow end-to-end path through the locally signed-in Codex runtime.
 if let flag = CommandLine.arguments.firstIndex(of: "--codex-probe") {
     let model = CommandLine.arguments.count > flag + 1
@@ -73,9 +73,8 @@ if let flag = CommandLine.arguments.firstIndex(of: "--voice-server") {
     dispatchMain()
 }
 
-// `--print-api-key`: print the endpoint key and exit. The Keychain item belongs
-// to this app, so the `security` CLI cannot read it without a prompt; scripts and
-// headless clients need a way to ask the owner for it.
+// `--print-api-key`: print the endpoint's local access key for scripts and
+// headless clients.
 if let flag = CommandLine.arguments.firstIndex(of: "--print-api-key") {
     let name = CommandLine.arguments.count > flag + 1 ? CommandLine.arguments[flag + 1] : "claude"
     guard let scope = APIKeyScope(rawValue: name) else {
@@ -90,7 +89,7 @@ if let flag = CommandLine.arguments.firstIndex(of: "--print-api-key") {
         print("")
         exit(0)
     case .unavailable(let reason):
-        FileHandle.standardError.write(Data("Could not read \(scope.label) API key: \(reason)\n".utf8))
+        FileHandle.standardError.write(Data("Could not read \(scope.label) access key: \(reason)\n".utf8))
         exit(1)
     }
 }
