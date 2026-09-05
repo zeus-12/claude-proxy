@@ -5,9 +5,9 @@
 A menu-bar-only macOS app that exposes separate OpenAI-compatible endpoints for
 your Claude Code and Codex subscriptions.
 
-LLM Proxy gives each sign-in its own local API, switch, access key, settings, and
-help page. Claude defaults to `http://127.0.0.1:8787/v1`; Codex defaults to
-`http://127.0.0.1:8788/v1`. Paste the provider URL into any app that supports a
+LLM Proxy gives each sign-in its own local API, switch, optional API key, settings,
+and help page. Claude defaults to `http://127.0.0.1:8787/v1`; Codex defaults to
+`http://127.0.0.1:17878/v1`. Paste the provider URL into any app that supports a
 custom OpenAI endpoint.
 
 No separate per-app AI plan. No extra tokens to buy. The apps you already use just
@@ -33,7 +33,7 @@ never executed by the proxy.
 
 ```
 Claude client ──HTTP :8787──▶ claude CLI
-Codex client  ──HTTP :8788──▶ warm Codex app-server
+Codex client  ──HTTP :17878─▶ warm Codex app-server
              ◀──── OpenAI JSON / SSE ────
 ```
 
@@ -104,8 +104,9 @@ swift run
 
 It launches as a **menu-bar app** — no Dock icon, no window. Click the icon in the
 menu bar to start, stop, configure, or open help for each endpoint.
-All endpoints start off disabled. Create a separate local access key in Settings
-before starting each endpoint.
+All endpoints start off disabled. Turn on whichever endpoint you want; its state
+persists across app launches. API-key protection is optional and configured per
+endpoint in Settings.
 
 To stop it: `pkill -f LLMProxy`.
 
@@ -113,21 +114,26 @@ To stop it: `pkill -f LLMProxy`.
 
 In any OpenAI-compatible client, choose one provider:
 
-| Provider | Base URL | Access key | Models |
+| Provider | Base URL | API key | Models |
 | --- | --- | --- | --- |
-| Claude | `http://127.0.0.1:8787/v1` | Required Claude key | `sonnet`, `opus`, `haiku` |
-| Codex | `http://127.0.0.1:8788/v1` | Required Codex key | supported GPT-5.6 ids |
+| Claude | `http://127.0.0.1:8787/v1` | Optional | `sonnet`, `opus`, `haiku` |
+| Codex | `http://127.0.0.1:17878/v1` | Optional | supported GPT-5.6 ids |
 
 ### Try it with curl
 
-Create the endpoint's local access key in Settings, then turn on the endpoint.
+Turn on the endpoint from the menu. The examples below work with API-key
+protection left off, which is the default.
+
+Requests that carry a browser `Origin` header are refused with a 403 unless that
+origin is allowlisted, so a web page you happen to have open cannot spend your
+subscription. curl, the OpenAI SDKs and native clients send no `Origin` and are
+unaffected.
 
 Claude, non-streaming:
 
 ```bash
 curl http://127.0.0.1:8787/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <access-key>' \
   -d '{
     "model": "sonnet",
     "messages": [{"role": "user", "content": "Give me three names for a coffee shop."}]
@@ -137,9 +143,8 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 Codex, streaming (SSE):
 
 ```bash
-curl -N http://127.0.0.1:8788/v1/chat/completions \
+curl -N http://127.0.0.1:17878/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <access-key>' \
   -d '{
     "model": "gpt-5.6-luna",
     "stream": true,
@@ -156,8 +161,9 @@ with `http --stream`.
 The server binds to `127.0.0.1` only. To reach it from another device or a hosted
 app, run a local tunnel — it runs on your Mac and forwards to the port:
 
-Every endpoint requires its own access key. Keep that key private when you expose
-an endpoint through a tunnel.
+Before exposing an endpoint through a tunnel, enable **Require API key** in its
+Settings and keep that key private. A tunnel is the one case where the loopback
+bind stops protecting you.
 
 ```bash
 ngrok http 8787

@@ -1,47 +1,57 @@
 import SwiftUI
 
-struct APIKeySection: View {
+struct APIKeyControls: View {
     @EnvironmentObject private var apiKey: APIKeyController
     let scope: APIKeyScope
 
     @State private var draft = ""
     @State private var revealed = false
-    @State private var confirmingRegeneration = false
 
     var body: some View {
-        Section("Access key") {
-            VStack(alignment: .leading, spacing: 4) {
-                Label {
-                    Text(isConfigured ? "Access key configured" : "Access key required")
-                        .fontWeight(.medium)
-                } icon: {
-                    Image(systemName: isConfigured ? "checkmark.circle.fill" : "key.fill")
-                        .foregroundStyle(isConfigured ? .green : .orange)
-                }
+        PanelRow("Require API key", detail: environmentManaged ? "Set by the environment" : nil) {
+            Toggle("Require API key", isOn: Binding(
+                get: { apiKey.isRequired(scope) },
+                set: setRequired
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.small)
+            .disabled(environmentManaged)
+            .help(environmentManaged
+                  ? "\(APIKey.environmentName(for: scope)) is set, so this endpoint always requires a key."
+                  : "Require clients to send an API key.")
+        }
+        .onAppear { draft = apiKey.key(scope) ?? "" }
 
-                Text("Clients must send this local key with every request. It is not your \(scope.accountLabel) credential.")
-                    .font(.caption)
+        if environmentManaged {
+            PanelDivider()
+
+            // The environment key is what the server enforces, so editing the
+            // stored one here would change nothing a client can observe.
+            PanelRow("API key", detail: "Read from the environment") {
+                Text(APIKey.environmentName(for: scope))
+                    .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+        } else if apiKey.isRequired(scope) {
+            PanelDivider()
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Key")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                HStack(spacing: 8) {
+            PanelRow("API key") {
+                HStack(spacing: 6) {
                     Group {
                         if revealed {
-                            TextField("", text: $draft, prompt: Text("Paste or enter a key"))
+                            TextField("API key", text: $draft)
                         } else {
-                            SecureField("", text: $draft, prompt: Text("Paste or enter a key"))
+                            SecureField("API key", text: $draft)
                         }
                     }
-                    .font(.system(.body, design: .monospaced))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityLabel("Access key")
+                    .font(.system(.caption, design: .monospaced))
+                    .textFieldStyle(.plain)
+                    .frame(width: 132)
+                    .compactFieldBackground()
+                    .onSubmit(save)
 
                     Button {
                         revealed.toggle()
@@ -49,68 +59,44 @@ struct APIKeySection: View {
                         Image(systemName: revealed ? "eye.slash" : "eye")
                     }
                     .buttonStyle(.borderless)
-                    .help(revealed ? "Hide access key" : "Show access key")
-                    .accessibilityLabel(revealed ? "Hide access key" : "Show access key")
+                    .help(revealed ? "Hide API key" : "Show API key")
 
-                    CopyButton(draft)
-                }
-            }
+                    Button("Apply", action: save)
+                        .controlSize(.small)
+                        .disabled(!canSave)
 
-            HStack(spacing: 8) {
-                Button(isConfigured ? "Save changes" : "Save access key") {
-                    save()
-                }
-                .disabled(!canSave)
-
-                Button(isConfigured ? "Generate new key" : "Generate access key") {
-                    if isConfigured {
-                        confirmingRegeneration = true
-                    } else {
-                        generate()
+                    Button(action: generate) {
+                        Image(systemName: "arrow.clockwise")
                     }
+                    .buttonStyle(.borderless)
+                    .help("Generate new API key")
+                    .accessibilityLabel("Generate new API key")
                 }
             }
-            .controlSize(.small)
-
-            if case .unavailable(let reason) = apiKey.state(scope) {
-                Label(reason, systemImage: "xmark.octagon.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            } else {
-                Text("Stored locally with permissions limited to your macOS account. This access key never uses Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text(header)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
         }
-        .confirmationDialog(
-            "Generate a new \(scope.label) access key?",
-            isPresented: $confirmingRegeneration
-        ) {
-            Button("Generate new key", role: .destructive) { generate() }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("Clients using the current key will stop working until you update them.")
+
+        if case .unavailable(let reason) = apiKey.state(scope) {
+            Label(reason, systemImage: "xmark.octagon.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .padding(12)
         }
-        .onAppear { draft = apiKey.key(scope) ?? "" }
     }
 
-    private var isConfigured: Bool { apiKey.isConfigured(scope) }
+    private var environmentManaged: Bool { apiKey.isEnvironmentManaged(scope) }
 
     private var canSave: Bool {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && trimmed != (apiKey.key(scope) ?? "")
     }
 
-    private var header: String {
-        switch scope {
-        case .claude, .codex: return "Authorization: Bearer <access-key>"
-        case .voice: return "Authorization: Token <access-key>  ·  ?token=<access-key>"
+    private func setRequired(_ required: Bool) {
+        if required, !apiKey.isConfigured(scope) {
+            guard let key = apiKey.generate(scope) else { return }
+            draft = key
+            revealed = true
         }
+        apiKey.setRequired(required, for: scope)
     }
 
     private func save() {
@@ -123,14 +109,5 @@ struct APIKeySection: View {
         guard let key = apiKey.generate(scope) else { return }
         draft = key
         revealed = true
-    }
-}
-
-private extension APIKeyScope {
-    var accountLabel: String {
-        switch self {
-        case .claude, .voice: return "Claude Code"
-        case .codex: return "Codex"
-        }
     }
 }

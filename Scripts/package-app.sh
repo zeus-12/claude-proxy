@@ -8,14 +8,15 @@
 #   dist/LLM Proxy.app
 #   dist/LLM-Proxy-<version>.zip
 #
-# The app is a universal (arm64 + x86_64) binary. It is NOT code-signed or
-# notarized — see the README for the Gatekeeper note users will hit.
+# The app is a universal (arm64 + x86_64) binary. It is ad-hoc signed by
+# default and is not notarized. Set CODESIGN_IDENTITY to opt into stable local
+# signing for development permissions.
 set -euo pipefail
 
 VERSION="${1:-0.0.0}"
 APP_NAME="LLM Proxy"
 EXEC_NAME="LLMProxy"
-BUNDLE_ID="com.zeus12.claude-proxy"
+BUNDLE_ID="com.zeus12.llm-proxy"
 ICON_SRC="Assets/AppIcon-1024.png"
 
 DIST="dist"
@@ -81,29 +82,19 @@ gen 1024 icon_512x512@2x.png
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
 
-# Code signing. macOS ties Keychain "Always Allow" and TCC permissions
-# (Microphone, Accessibility, Input Monitoring) to the app's signing identity.
-# An UNSIGNED app has no stable identity, so every launch/rebuild looks like a
-# brand-new app and macOS re-prompts forever — permissions can never stick.
-#
-# Signing with a stable self-signed certificate fixes that: approve once, and
-# the grants persist across launches and rebuilds. Create the cert once with:
-#   Keychain Access → Certificate Assistant → Create a Certificate…
-#   Name: "Claude Proxy Dev", Type: Self Signed Root, Certificate Type: Code Signing
-# (or override the name via CODESIGN_IDENTITY).
-# A self-signed cert shows as "untrusted" (it isn't from Apple), so it won't
-# appear in `security find-identity -p codesigning` — but codesign can still USE
-# it to sign, and that's all we need. So we just attempt the real signature and
-# only fall back to ad-hoc if signing actually fails. Run Scripts/setup-signing.sh
-# once to create the cert.
-SIGN_ID="${CODESIGN_IDENTITY:-Claude Proxy Dev}"
+# A stable identity preserves macOS privacy grants across development rebuilds,
+# but resolving a private signing key may show a Keychain prompt. Ordinary
+# packaging therefore uses ad-hoc signing and never touches a private key.
+SIGN_ID="${CODESIGN_IDENTITY:-}"
 echo "==> Code signing"
-if codesign --force --deep --sign "$SIGN_ID" "$APP" 2>/dev/null; then
-    echo "    signed with '$SIGN_ID' — Mic/Accessibility/Keychain grants persist across rebuilds"
+if [[ -z "$SIGN_ID" || "$SIGN_ID" == "-" ]]; then
+    codesign --force --deep --sign - "$APP"
+    echo "    ad-hoc signed"
+elif codesign --force --deep --sign "$SIGN_ID" "$APP" 2>/dev/null; then
+    echo "    signed with '$SIGN_ID'"
     codesign --verify "$APP" 2>/dev/null || true
 else
-    echo "    WARNING: identity '$SIGN_ID' not found — run Scripts/setup-signing.sh."
-    echo "    Falling back to ad-hoc; macOS will RE-PROMPT for permissions on every rebuild."
+    echo "    WARNING: identity '$SIGN_ID' is unavailable; falling back to ad-hoc signing."
     codesign --force --deep --sign - "$APP"
 fi
 

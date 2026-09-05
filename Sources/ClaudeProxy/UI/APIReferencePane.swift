@@ -3,47 +3,39 @@ import SwiftUI
 /// A provider-specific help page, so Claude and Codex instructions never mix.
 struct APIReferencePane: View {
     let section: APIDocs.Section
+
     var body: some View {
-        Form {
-            Section {
-                HStack(alignment: .center, spacing: 12) {
-                    Image(systemName: section.systemImage)
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 38, height: 38)
-                        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(section.title).font(.title2.bold())
-                        Text("Endpoints, request formats, supported features, and examples.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    PanelSectionLabel(title: "Quick reference")
                     Spacer()
-                    CopyDocsButton(title: "Copy API reference") {
+                    CopyDocsButton(title: "Copy") {
                         APIDocs.markdown(for: section)
                     }
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 4)
+
+                ForEach(section.entries, id: \.title) { entry in
+                    FeatureRow(entry: entry)
                 }
             }
-
-            Section("Reference") {
-                ForEach(section.entries, id: \.title) { FeatureRow(entry: $0) }
-            }
+            .padding(10)
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.top, 8, for: .scrollContent)
+        .scrollIndicators(.hidden)
     }
 }
 
 private struct FeatureRow: View {
     let entry: APIDocs.Entry
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(entry.title).font(.body.weight(.semibold))
+        VStack(alignment: .leading, spacing: 6) {
+            Text(entry.title)
+                .font(.callout.weight(.semibold))
             Text(entry.detail)
-                .font(.callout)
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 6) {
@@ -51,13 +43,25 @@ private struct FeatureRow: View {
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .lineLimit(3)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                    .truncationMode(.middle)
                 CopyButton(entry.code)
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, 8)
+            .frame(minHeight: 28)
+            .background(
+                Color.black.opacity(0.2),
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+            )
         }
-        .padding(.vertical, 4)
+        .padding(12)
+        .background(
+            Color.white.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.075))
+        }
     }
 }

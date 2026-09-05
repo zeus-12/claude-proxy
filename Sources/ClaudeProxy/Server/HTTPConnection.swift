@@ -25,6 +25,10 @@ final class HTTPConnection {
     private let queue: DispatchQueue
     private let backend: ChatBackend
     private var buffer = Data()
+    /// Set once the request's `Origin` has been checked, and echoed back in the
+    /// CORS headers. Nil means no header is sent, so a browser cannot read the
+    /// response even if it managed to issue the request.
+    private var echoedOrigin: String?
     /// Keeps this object alive for the duration of the connection. The
     /// NWConnection's callbacks capture `self` weakly, so without this strong
     /// self-reference the handler would deallocate the moment `accept()`
@@ -73,7 +77,21 @@ final class HTTPConnection {
     // MARK: - Routing
 
     private func route(_ request: HTTPRequest) {
-        // CORS preflight so browser-based clients work.
+        // Checked ahead of everything, preflight included: refusing the preflight
+        // is what stops the browser from ever sending the real request. API-key
+        // protection is optional, so this — not the key — is what keeps a page
+        // the user happens to have open from spending their subscription.
+        let origin = OriginPolicy.decide(originHeader: request.headers["origin"])
+        guard !origin.isDenied else {
+            writeError(status: 403,
+                       message: "This origin may not call the proxy. Clients that send no "
+                              + "`Origin` header, such as curl and the OpenAI SDKs, are unaffected.",
+                       type: "invalid_request_error")
+            return
+        }
+        echoedOrigin = origin.echoedOrigin
+
+        // CORS preflight so an allowlisted browser client works.
         if request.method == "OPTIONS" {
             writeRaw(status: 204, headers: corsHeaders, body: Data())
             return
@@ -82,10 +100,10 @@ final class HTTPConnection {
         // Liveness stays open so a client can check the endpoint is up before it
         // has been given a key; it exposes nothing but the model list.
         let isPublic = request.path == "/" || request.path == "/health"
-        if !isPublic, !APIKey.accepts(APIKey.presented(headers: request.headers), for: backend.keyScope) {
+        if !isPublic, !APIKey.authorizes(APIKey.presented(headers: request.headers), for: backend.keyScope) {
             writeError(status: 401,
-                       message: "Invalid access key. Send it as "
-                              + "`Authorization: Bearer <access-key>`; copy the key from Settings.",
+                       message: "Invalid API key. Send it as "
+                              + "`Authorization: Bearer <api-key>`.",
                        type: "invalid_request_error")
             return
         }
@@ -362,12 +380,17 @@ final class HTTPConnection {
 
     // MARK: - Writing helpers
 
+    /// `Access-Control-Allow-Origin` is only ever the one allowlisted origin. A
+    /// wildcard would let every page the user visits read this endpoint's
+    /// responses, which the optional API key no longer prevents.
     private var corsHeaders: [String: String] {
-        [
-            "Access-Control-Allow-Origin": "*",
+        var headers = [
+            "Vary": "Origin",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key"
         ]
+        if let echoedOrigin { headers["Access-Control-Allow-Origin"] = echoedOrigin }
+        return headers
     }
 
     private var sseHeaders: [String: String] {

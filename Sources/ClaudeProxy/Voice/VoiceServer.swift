@@ -135,15 +135,23 @@ private final class VoiceUpgrade {
         let (rawPath, query) = DeepgramListenParams.split(path: request.path)
         VoiceLog.write(tag, "connect \(request.method) \(rawPath)")
 
-        // CORS never applies to WebSockets, so the key is the only thing standing
-        // between this endpoint and any page the user happens to visit. Refused
-        // before the upgrade, so the client sees a plain 401 rather than a socket
-        // that opens and then dies.
-        guard APIKey.accepts(APIKey.presented(headers: request.headers, query: query), for: .voice) else {
-            VoiceLog.write(tag, "rejected: missing or invalid access key")
-            writeHTTPError("Invalid access key. Send it as `Authorization: Token <access-key>`, "
+        // CORS never applies to WebSockets: no preflight is sent, and a page can
+        // open a socket to this port from any origin. `Origin` is the only signal
+        // separating a page from a native client, and the API key cannot stand in
+        // for it because key protection is optional. Both checks run before the
+        // upgrade, so the client sees a plain HTTP error rather than a socket that
+        // opens and then dies.
+        guard !OriginPolicy.decide(originHeader: request.headers["origin"]).isDenied else {
+            VoiceLog.write(tag, "rejected: origin not allowed")
+            writeHTTPError("This origin may not open a Voice connection.", status: 403)
+            return
+        }
+
+        guard APIKey.authorizes(APIKey.presented(headers: request.headers, query: query), for: .voice) else {
+            VoiceLog.write(tag, "rejected: missing or invalid API key")
+            writeHTTPError("Invalid API key. Send it as `Authorization: Token <api-key>`, "
                            + "as the `token` query parameter, or as the "
-                           + "`token, <access-key>` WebSocket subprotocol.", status: 401)
+                           + "`token, <api-key>` WebSocket subprotocol.", status: 401)
             return
         }
         VoiceLog.write(tag, "  query: \(query.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " "))")
@@ -180,7 +188,12 @@ private final class VoiceUpgrade {
 
     private func writeHTTPError(_ message: String, status: Int = 400) {
         let body = Data(message.utf8)
-        let reason = status == 401 ? "Unauthorized" : "Bad Request"
+        let reason: String
+        switch status {
+        case 401: reason = "Unauthorized"
+        case 403: reason = "Forbidden"
+        default: reason = "Bad Request"
+        }
         let head = """
         HTTP/1.1 \(status) \(reason)\r
         Content-Type: text/plain; charset=utf-8\r

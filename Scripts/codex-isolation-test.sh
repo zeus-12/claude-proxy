@@ -71,11 +71,22 @@ HEALTH=$(curl -s "http://127.0.0.1:$PORT/health")
 record "advertises Codex only" "$([[ "$HEALTH" == *'"provider":"codex"'* && "$HEALTH" != *'sonnet'* ]] && echo 1 || echo 0)" "$HEALTH"
 
 NO_KEY=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/v1/models")
-record "missing access key is rejected" "$([[ "$NO_KEY" == 401 ]] && echo 1 || echo 0)" "HTTP $NO_KEY"
+record "missing API key is rejected" "$([[ "$NO_KEY" == 401 ]] && echo 1 || echo 0)" "HTTP $NO_KEY"
 WITH_KEY=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ACCESS_KEY" "http://127.0.0.1:$PORT/v1/models")
-record "configured access key is accepted" "$([[ "$WITH_KEY" == 200 ]] && echo 1 || echo 0)" "HTTP $WITH_KEY"
+record "configured API key is accepted" "$([[ "$WITH_KEY" == 200 ]] && echo 1 || echo 0)" "HTTP $WITH_KEY"
 WRONG_KEY=$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong' "http://127.0.0.1:$PORT/v1/models")
-record "wrong access key is rejected" "$([[ "$WRONG_KEY" == 401 ]] && echo 1 || echo 0)" "HTTP $WRONG_KEY"
+record "wrong API key is rejected" "$([[ "$WRONG_KEY" == 401 ]] && echo 1 || echo 0)" "HTTP $WRONG_KEY"
+
+# A page the user has open can reach 127.0.0.1, and the optional API key cannot
+# be what stops it. `Origin` can: page JS cannot forge or suppress it.
+ORIGIN_PREFLIGHT=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS -H 'Origin: https://evil.example' "$URL")
+record "cross-origin preflight refused" "$([[ "$ORIGIN_PREFLIGHT" == 403 ]] && echo 1 || echo 0)" "HTTP $ORIGIN_PREFLIGHT"
+ORIGIN_POST=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://evil.example' -H "Authorization: Bearer $ACCESS_KEY" -H 'content-type: application/json' -d "$(body 'hi')" "$URL")
+record "cross-origin chat refused" "$([[ "$ORIGIN_POST" == 403 ]] && echo 1 || echo 0)" "HTTP $ORIGIN_POST"
+NULL_ORIGIN=$(curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' "http://127.0.0.1:$PORT/health")
+record "file:// origin refused" "$([[ "$NULL_ORIGIN" == 403 ]] && echo 1 || echo 0)" "HTTP $NULL_ORIGIN"
+WILDCARD=$(curl -s -D - -o /dev/null -X OPTIONS "$URL" | grep -ci 'access-control-allow-origin: \*' || true)
+record "no wildcard CORS header" "$([[ "$WILDCARD" == 0 ]] && echo 1 || echo 0)" "wildcard headers: $WILDCARD"
 
 PLAIN_RAW=$(ask "$(body 'Reply with exactly CODEX_CHAT_OK')")
 record "OpenAI completion wire shape" "$(printf '%s' "$PLAIN_RAW" | valid_completion_shape && echo 1 || echo 0)" "$PLAIN_RAW"

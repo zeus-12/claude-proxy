@@ -4,6 +4,8 @@ import Foundation
 @MainActor
 final class APIKeyController: ObservableObject {
     @Published private(set) var states: [APIKeyScope: APIKeyState] = [:]
+    @Published private(set) var requiredScopes: Set<APIKeyScope> = []
+    @Published private(set) var environmentManagedScopes: Set<APIKeyScope> = []
 
     private let loadState: @Sendable (APIKeyScope) -> APIKeyState
 
@@ -13,6 +15,8 @@ final class APIKeyController: ObservableObject {
         self.loadState = loadState
         for scope in APIKeyScope.allCases {
             states[scope] = loadState(scope)
+            if APIKey.isRequired(scope) { requiredScopes.insert(scope) }
+            if APIKey.isEnvironmentManaged(scope) { environmentManagedScopes.insert(scope) }
         }
     }
 
@@ -27,6 +31,24 @@ final class APIKeyController: ObservableObject {
 
     func isConfigured(_ scope: APIKeyScope) -> Bool {
         key(scope) != nil
+    }
+
+    func isRequired(_ scope: APIKeyScope) -> Bool {
+        requiredScopes.contains(scope)
+    }
+
+    func isEnvironmentManaged(_ scope: APIKeyScope) -> Bool {
+        environmentManagedScopes.contains(scope)
+    }
+
+    func setRequired(_ required: Bool, for scope: APIKeyScope) {
+        guard !isEnvironmentManaged(scope) else { return }
+        APIKey.setRequired(required, for: scope)
+        if required {
+            requiredScopes.insert(scope)
+        } else {
+            requiredScopes.remove(scope)
+        }
     }
 
     @discardableResult

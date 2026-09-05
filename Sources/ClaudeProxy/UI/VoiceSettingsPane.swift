@@ -3,77 +3,51 @@ import AppKit
 
 struct VoiceSettingsPane: View {
     @EnvironmentObject var voice: VoiceController
-    @EnvironmentObject private var apiKey: APIKeyController
     @State private var portText = ""
 
     var body: some View {
-        Form {
-            APIKeySection(scope: .voice)
-
-            Section("Endpoint") {
-                LabeledContent("WebSocket URL") {
-                    HStack(spacing: 6) {
-                        Text(voice.config.endpointURL)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
-                        CopyButton(voice.config.endpointURL)
-                    }
-                }
-                LabeledContent("Status") {
-                    EndpointStatusLabel(status: voice.status)
-                }
-                Toggle(isOn: Binding(get: { voice.isActive }, set: { _ in voice.toggle() })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Run endpoint")
-                        Text("Accept local speech-to-text WebSocket connections.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-                .disabled(!apiKey.isConfigured(.voice))
-
-                if !apiKey.isConfigured(.voice) {
-                    Label("Create an access key before starting this endpoint.", systemImage: "key.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            Section {
-                LabeledContent("Port") {
+        ScrollView {
+            PanelCard {
+                PanelRow("WebSocket URL", detail: voice.config.endpointURL) {
                     HStack(spacing: 8) {
+                        CopyButton(voice.config.endpointURL)
+                        StatusDot(status: voice.status)
+                        Toggle(
+                            "Run Voice endpoint",
+                            isOn: Binding(get: { voice.isEnabled }, set: { _ in voice.toggle() })
+                        )
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .controlSize(.small)
+                    }
+                }
+
+                PanelDivider()
+
+                PanelRow("Port") {
+                    HStack(spacing: 6) {
                         TextField("Port", text: $portText)
-                            .frame(width: 90)
+                            .textFieldStyle(.plain)
+                            .font(.system(.callout, design: .monospaced))
+                            .frame(width: 58)
                             .multilineTextAlignment(.trailing)
+                            .compactFieldBackground()
                             .onChange(of: portText) { _, new in
-                                let f = new.filter(\.isNumber)
-                                if f != new { portText = f }
+                                let filtered = new.filter(\.isNumber)
+                                if filtered != new { portText = filtered }
                             }
-                        Button("Apply port") { applyPort() }
+                        Button("Apply", action: applyPort)
+                            .controlSize(.small)
                             .disabled(!portChanged || !portValid)
                     }
                 }
-                Toggle(isOn: Binding(
-                    get: { voice.config.autoStart },
-                    set: { voice.config.autoStart = $0 }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Start at login")
-                        Text("Run this endpoint whenever LLM Proxy launches.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-                .disabled(!apiKey.isConfigured(.voice))
-            } header: {
-                Text("Configuration")
+
+                PanelDivider()
+                APIKeyControls(scope: .voice)
             }
+            .padding(10)
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.top, 8, for: .scrollContent)
+        .scrollIndicators(.hidden)
         .onAppear { portText = String(voice.config.port) }
     }
 

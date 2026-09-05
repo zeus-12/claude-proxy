@@ -73,7 +73,7 @@ if let flag = CommandLine.arguments.firstIndex(of: "--voice-server") {
     dispatchMain()
 }
 
-// `--print-api-key`: print the endpoint's local access key for scripts and
+// `--print-api-key`: print the endpoint's local API key for scripts and
 // headless clients.
 if let flag = CommandLine.arguments.firstIndex(of: "--print-api-key") {
     let name = CommandLine.arguments.count > flag + 1 ? CommandLine.arguments[flag + 1] : "claude"
@@ -89,7 +89,7 @@ if let flag = CommandLine.arguments.firstIndex(of: "--print-api-key") {
         print("")
         exit(0)
     case .unavailable(let reason):
-        FileHandle.standardError.write(Data("Could not read \(scope.label) access key: \(reason)\n".utf8))
+        FileHandle.standardError.write(Data("Could not read \(scope.label) API key: \(reason)\n".utf8))
         exit(1)
     }
 }
@@ -108,7 +108,10 @@ if let flag = CommandLine.arguments.firstIndex(where: { $0 == "--claude-server" 
 }
 
 if let flag = CommandLine.arguments.firstIndex(of: "--codex-server") {
-    let port = CommandLine.arguments.count > flag + 1 ? Int(CommandLine.arguments[flag + 1]) ?? 8788 : 8788
+    let defaultPort = ChatBackend.codex.defaultPort
+    let port = CommandLine.arguments.count > flag + 1
+        ? Int(CommandLine.arguments[flag + 1]) ?? defaultPort
+        : defaultPort
     let server = ProxyServer(endpoint: ChatEndpoint(port: port), backend: .codex) { status in
         print("codex server: \(status)")
     }
@@ -117,14 +120,18 @@ if let flag = CommandLine.arguments.firstIndex(of: "--codex-server") {
     dispatchMain()
 }
 
-// Menu-bar-only app: no Dock icon, no main window. The status item lives in
-// AppDelegate. We set `.accessory` before `run()` so the Dock never flashes.
+// Menu-bar-only app: no Dock icon, no main window. Packaged builds declare
+// LSUIElement; direct executable launches use `.accessory` as a fallback.
 // Top-level code runs on the main thread, so we assert main-actor isolation to
 // construct the (main-actor) delegate and controller.
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()
     app.delegate = delegate
-    app.setActivationPolicy(.accessory)
-    app.run()
+    if Bundle.main.object(forInfoDictionaryKey: "LSUIElement") == nil {
+        app.setActivationPolicy(.accessory)
+    }
+    withExtendedLifetime(delegate) {
+        app.run()
+    }
 }

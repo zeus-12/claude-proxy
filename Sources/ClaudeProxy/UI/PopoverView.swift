@@ -1,102 +1,81 @@
 import AppKit
 import SwiftUI
 
+private enum PopoverPage {
+    case overview
+    case claudeSettings
+    case codexSettings
+    case voiceSettings
+    case claudeHelp
+    case codexHelp
+    case voiceHelp
+
+    var title: String {
+        switch self {
+        case .overview: "LLM Proxy"
+        case .claudeSettings: "Claude settings"
+        case .codexSettings: "Codex settings"
+        case .voiceSettings: "Voice settings"
+        case .claudeHelp: "Claude API"
+        case .codexHelp: "Codex API"
+        case .voiceHelp: "Voice API"
+        }
+    }
+}
+
 struct PopoverView: View {
     @ObservedObject var claude: ChatController
     @ObservedObject var codex: ChatController
     @EnvironmentObject private var voice: VoiceController
     @EnvironmentObject private var apiKey: APIKeyController
+    @State private var page = PopoverPage.overview
 
-    let onOpenSettings: (SettingsTab) -> Void
-
+    @ViewBuilder
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-
-            ScrollView {
-                VStack(spacing: 10) {
-                    chatCard(
-                        claude,
-                        settings: .claude,
-                        help: .claudeHelp
-                    )
-                    chatCard(
-                        codex,
-                        settings: .codex,
-                        help: .codexHelp
-                    )
-                    EndpointCard(
-                        icon: "waveform",
-                        name: "Voice",
-                        subtitle: "Speech-to-text WebSocket",
-                        url: voice.config.endpointURL,
-                        status: voice.status,
-                        isActive: voice.isActive,
-                        isAvailable: true,
-                        isConfigured: apiKey.isConfigured(.voice),
-                        onToggle: voice.toggle,
-                        onSettings: { onOpenSettings(.voice) },
-                        onHelp: { onOpenSettings(.voiceHelp) }
-                    )
-                }
-                .padding(12)
-            }
-
-            Divider()
-            footer
+        if page == .overview {
+            overview
+                .frame(width: 360)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(PopoverBackdrop())
+        } else {
+            detailPage
+                .frame(width: 360, height: 430)
+                .background(PopoverBackdrop())
         }
-        .frame(width: 400, height: 500)
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "arrow.left.arrow.right")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 9))
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("LLM Proxy").font(.headline)
-                Text("Local endpoints for your subscriptions")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                onOpenSettings(.claude)
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .buttonStyle(.borderless)
-            .help("Open Settings")
-            .accessibilityLabel("Open Settings")
+    private var overview: some View {
+        VStack(spacing: 10) {
+            chatCard(
+                claude,
+                settings: .claudeSettings,
+                help: .claudeHelp
+            )
+            chatCard(
+                codex,
+                settings: .codexSettings,
+                help: .codexHelp
+            )
+            EndpointCard(
+                icon: "waveform",
+                name: "Voice",
+                subtitle: "Speech to text",
+                url: voice.config.endpointURL,
+                status: voice.status,
+                isActive: voice.isEnabled,
+                isAvailable: true,
+                onToggle: voice.toggle,
+                onSettings: { page = .voiceSettings },
+                onHelp: { page = .voiceHelp }
+            )
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    private var footer: some View {
-        HStack {
-            Text(runningSummary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Button("Quit LLM Proxy") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.borderless)
-                .font(.caption)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .padding(10)
     }
 
     private func chatCard(
         _ chat: ChatController,
-        settings: SettingsTab,
-        help: SettingsTab
+        settings: PopoverPage,
+        help: PopoverPage
     ) -> some View {
         EndpointCard(
             icon: chat.backend.icon,
@@ -104,25 +83,76 @@ struct PopoverView: View {
             subtitle: chat.backend.subtitle,
             url: chat.config.baseURL,
             status: chat.status,
-            isActive: chat.isActive,
+            isActive: chat.isEnabled,
             isAvailable: chat.isAvailable,
-            isConfigured: apiKey.isConfigured(chat.backend.keyScope),
             onToggle: chat.toggle,
-            onSettings: { onOpenSettings(settings) },
-            onHelp: { onOpenSettings(help) }
+            onSettings: { page = settings },
+            onHelp: { page = help }
         )
     }
 
-    private var runningSummary: String {
-        let count = (claude.isActive ? 1 : 0)
-            + (codex.isActive ? 1 : 0)
-            + (voice.isActive ? 1 : 0)
-        switch count {
-        case 0: return "No endpoints running"
-        case 1: return "1 endpoint running"
-        default: return "\(count) endpoints running"
+    private var detailPage: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button {
+                    page = .overview
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help("Back")
+                .accessibilityLabel("Back to endpoints")
+
+                Text(page.title)
+                    .font(.body.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .background(Color.white.opacity(0.025))
+
+            Divider()
+
+            detailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        switch page {
+        case .overview:
+            EmptyView()
+        case .claudeSettings:
+            ChatSettingsPane(chat: claude)
+        case .codexSettings:
+            ChatSettingsPane(chat: codex)
+        case .voiceSettings:
+            VoiceSettingsPane()
+        case .claudeHelp:
+            APIReferencePane(section: APIDocs.chat(
+                backend: .claude,
+                baseURL: claude.config.baseURL,
+                keyRequired: apiKey.isRequired(.claude)
+            ))
+        case .codexHelp:
+            APIReferencePane(section: APIDocs.chat(
+                backend: .codex,
+                baseURL: codex.config.baseURL,
+                keyRequired: apiKey.isRequired(.codex)
+            ))
+        case .voiceHelp:
+            APIReferencePane(section: APIDocs.voice(
+                endpointURL: voice.config.endpointURL,
+                keyRequired: apiKey.isRequired(.voice)
+            ))
+        }
+    }
+
 }
 
 private struct EndpointCard: View {
@@ -133,21 +163,20 @@ private struct EndpointCard: View {
     let status: InstanceStatus
     let isActive: Bool
     let isAvailable: Bool
-    let isConfigured: Bool
     let onToggle: () -> Void
     let onSettings: () -> Void
     let onHelp: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(isActive ? Color.accentColor : .secondary)
-                    .frame(width: 30, height: 30)
+                    .frame(width: 32, height: 32)
                     .background(
-                        (isActive ? Color.accentColor : Color.secondary).opacity(0.11),
-                        in: RoundedRectangle(cornerRadius: 9)
+                        (isActive ? Color.accentColor : Color.white).opacity(isActive ? 0.14 : 0.055),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous)
                     )
 
                 VStack(alignment: .leading, spacing: 1) {
@@ -164,7 +193,7 @@ private struct EndpointCard: View {
                 .toggleStyle(.switch)
                 .labelsHidden()
                 .accessibilityLabel("Run \(name) endpoint")
-                .disabled(!isConfigured || (!isAvailable && !isActive))
+                .disabled(!isAvailable && !isActive)
             }
 
             if !isAvailable {
@@ -173,17 +202,6 @@ private struct EndpointCard: View {
                     icon: "exclamationmark.triangle.fill",
                     color: .orange
                 )
-            } else if !isConfigured {
-                HStack(spacing: 7) {
-                    message(
-                        "Set an access key before starting.",
-                        icon: "key.fill",
-                        color: .orange
-                    )
-                    Spacer()
-                    Button("Set up", action: onSettings)
-                        .controlSize(.small)
-                }
             } else if case .failed(let text) = status {
                 message(text, icon: "xmark.circle.fill", color: .red)
             }
@@ -192,7 +210,7 @@ private struct EndpointCard: View {
                 StatusDot(status: status)
                 Text(url)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 CopyButton(url)
@@ -206,7 +224,7 @@ private struct EndpointCard: View {
                 .accessibilityLabel("Open \(name) API help")
 
                 Button(action: onSettings) {
-                    Image(systemName: "gearshape")
+                    Image(systemName: "slider.horizontal.3")
                 }
                 .buttonStyle(.borderless)
                 .help("Open \(name) settings")
@@ -216,12 +234,12 @@ private struct EndpointCard: View {
         }
         .padding(12)
         .background(
-            Color(nsColor: .controlBackgroundColor),
-            in: RoundedRectangle(cornerRadius: 13)
+            Color.white.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: 13)
-                .strokeBorder(Color.primary.opacity(0.07))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.075))
         }
     }
 

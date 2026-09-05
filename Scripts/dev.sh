@@ -21,7 +21,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP="dist/LLM Proxy.app"
-BUNDLE_ID="com.zeus12.claude-proxy"
+BUNDLE_ID="com.zeus12.llm-proxy"
 LOG="$HOME/Library/Logs/LLMProxy/dictation.log"
 
 SIGN_ID="${CODESIGN_IDENTITY:-Claude Proxy Dev}"
@@ -102,7 +102,7 @@ if [[ "${1:-}" == "--reset-perms" ]]; then
 fi
 
 echo "==> Building + signing"
-./Scripts/package-app.sh 0.2.0-dev
+CODESIGN_IDENTITY="$SIGN_ID" ./Scripts/package-app.sh 0.2.0-dev
 
 echo "==> Clearing dictation log"
 rm -f "$LOG"

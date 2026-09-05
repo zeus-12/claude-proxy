@@ -26,7 +26,7 @@ enum APIKeyScope: String, CaseIterable, Sendable {
     }
 }
 
-/// Stores the proxy's local access keys in the app's private Application
+/// Stores the proxy's optional API keys in the app's private Application
 /// Support directory. These are not provider credentials: they only protect a
 /// loopback endpoint (or a tunnel the owner deliberately places in front of it).
 ///
@@ -43,9 +43,7 @@ enum APIKey {
         lock.lock()
         defer { lock.unlock() }
 
-        if let override = ProcessInfo.processInfo.environment[environmentName(for: scope)]?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !override.isEmpty {
+        if let override = environmentKey(for: scope) {
             return .required(override)
         }
 
@@ -65,7 +63,7 @@ enum APIKey {
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             resolved = .disabled
         } catch {
-            resolved = .unavailable("Unable to read the access key. \(error.localizedDescription)")
+            resolved = .unavailable("Unable to read the API key. \(error.localizedDescription)")
         }
 
         cached[scope] = resolved
@@ -81,6 +79,29 @@ enum APIKey {
         current(scope) != nil
     }
 
+    static func isRequired(_ scope: APIKeyScope) -> Bool {
+        protectionEnabled(
+            environmentKey: environmentKey(for: scope),
+            preference: UserDefaults.standard.bool(forKey: requirementName(for: scope))
+        )
+    }
+
+    static func protectionEnabled(environmentKey: String?, preference: Bool) -> Bool {
+        let key = environmentKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key?.isEmpty == false || preference
+    }
+
+    static func setRequired(_ required: Bool, for scope: APIKeyScope) {
+        UserDefaults.standard.set(required, forKey: requirementName(for: scope))
+    }
+
+    /// An environment key forces protection on and cannot be turned off from the
+    /// UI, so the toggle has to be shown as locked rather than as a switch whose
+    /// "off" the server would ignore.
+    static func isEnvironmentManaged(_ scope: APIKeyScope) -> Bool {
+        environmentKey(for: scope) != nil
+    }
+
     @discardableResult
     static func set(_ value: String, for scope: APIKeyScope) -> Result<Void, APIKeyError> {
         lock.lock()
@@ -88,7 +109,7 @@ enum APIKey {
 
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return .failure(APIKeyError(message: "Enter an access key or generate one."))
+            return .failure(APIKeyError(message: "Enter or generate an API key."))
         }
 
         do {
@@ -111,7 +132,7 @@ enum APIKey {
             cached[scope] = .required(trimmed)
             return .success(())
         } catch {
-            let message = "Unable to save the access key. \(error.localizedDescription)"
+            let message = "Unable to save the API key. \(error.localizedDescription)"
             cached[scope] = .unavailable(message)
             return .failure(APIKeyError(message: message))
         }
@@ -129,9 +150,22 @@ enum APIKey {
         lock.unlock()
     }
 
-    static func accepts(_ presented: String?, for scope: APIKeyScope) -> Bool {
-        guard case .required(let key) = state(scope) else { return false }
-        return accepts(presented, required: key)
+    static func authorizes(_ presented: String?, for scope: APIKeyScope) -> Bool {
+        authorizes(
+            presented,
+            protectionEnabled: isRequired(scope),
+            required: current(scope)
+        )
+    }
+
+    static func authorizes(
+        _ presented: String?,
+        protectionEnabled: Bool,
+        required: String?
+    ) -> Bool {
+        guard protectionEnabled else { return true }
+        guard let required else { return false }
+        return accepts(presented, required: required)
     }
 
     static func accepts(_ presented: String?, required: String) -> Bool {
@@ -158,8 +192,18 @@ enum APIKey {
         supportDirectory.appendingPathComponent("\(scope.rawValue)-access-key")
     }
 
-    private static func environmentName(for scope: APIKeyScope) -> String {
+    static func environmentName(for scope: APIKeyScope) -> String {
         "LLM_PROXY_ACCESS_KEY_\(scope.rawValue.uppercased())"
+    }
+
+    private static func environmentKey(for scope: APIKeyScope) -> String? {
+        let value = ProcessInfo.processInfo.environment[environmentName(for: scope)]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    private static func requirementName(for scope: APIKeyScope) -> String {
+        "apiKeyRequired.\(scope.rawValue)"
     }
 
     private static func constantTimeEquals(_ a: String, _ b: String) -> Bool {

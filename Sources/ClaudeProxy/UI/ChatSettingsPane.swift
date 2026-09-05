@@ -2,78 +2,73 @@ import SwiftUI
 
 struct ChatSettingsPane: View {
     @ObservedObject var chat: ChatController
-    @EnvironmentObject private var apiKey: APIKeyController
     @State private var portText = ""
 
     var body: some View {
-        Form {
-            APIKeySection(scope: chat.backend.keyScope)
-
-            Section("Endpoint") {
-                LabeledContent("Base URL") {
-                    HStack(spacing: 6) {
-                        Text(chat.config.baseURL).font(.system(.body, design: .monospaced)).textSelection(.enabled)
-                        CopyButton(chat.config.baseURL)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                PanelCard {
+                    PanelRow("Base URL", detail: chat.config.baseURL) {
+                        HStack(spacing: 8) {
+                            CopyButton(chat.config.baseURL)
+                            StatusDot(status: chat.status)
+                            Toggle(
+                                "Run \(chat.backend.title) endpoint",
+                                isOn: Binding(get: { chat.isEnabled }, set: { _ in chat.toggle() })
+                            )
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .disabled(!chat.isAvailable && !chat.isEnabled)
+                        }
                     }
-                }
-                LabeledContent("Status") { EndpointStatusLabel(status: chat.status) }
-                Toggle(isOn: Binding(get: { chat.isActive }, set: { _ in chat.toggle() })) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Run endpoint")
-                        Text("Accept local requests at the base URL above.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+
+                    PanelDivider()
+
+                    PanelRow("Port") {
+                        HStack(spacing: 6) {
+                            TextField("Port", text: $portText)
+                                .textFieldStyle(.plain)
+                                .font(.system(.callout, design: .monospaced))
+                                .frame(width: 58)
+                                .multilineTextAlignment(.trailing)
+                                .compactFieldBackground()
+                                .accessibilityLabel("Port")
+                                .onChange(of: portText) { _, value in
+                                    let filtered = value.filter(\.isNumber)
+                                    if filtered != value { portText = filtered }
+                                }
+                            Button("Apply", action: applyPort)
+                                .controlSize(.small)
+                                .disabled(!portChanged || !portValid)
+                        }
                     }
-                }
-                .toggleStyle(.switch)
-                .disabled(!apiKey.isConfigured(chat.backend.keyScope)
-                          || (!chat.isAvailable && !chat.isActive))
 
-                if !apiKey.isConfigured(chat.backend.keyScope) {
-                    Label("Create an access key before starting this endpoint.", systemImage: "key.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    PanelDivider()
+                    APIKeyControls(scope: chat.backend.keyScope)
                 }
-            }
 
-            Section("Connection") {
-                LabeledContent("Port") {
-                    HStack(spacing: 8) {
-                        TextField("Port", text: $portText).frame(width: 90).multilineTextAlignment(.trailing)
-                            .accessibilityLabel("Port")
-                            .onChange(of: portText) { _, value in
-                                let filtered = value.filter(\.isNumber)
-                                if filtered != value { portText = filtered }
+                VStack(alignment: .leading, spacing: 7) {
+                    PanelSectionLabel(title: "Available models")
+                        .padding(.leading, 4)
+
+                    PanelCard {
+                        ForEach(Array(chat.backend.models.enumerated()), id: \.element.id) { index, model in
+                            PanelRow(model.displayName) {
+                                Text(model.rawValue)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
                             }
-                        Button("Apply port", action: applyPort)
-                            .disabled(!portChanged || !portValid)
-                    }
-                }
-                Toggle(isOn: Binding(
-                    get: { chat.config.autoStart },
-                    set: { chat.config.autoStart = $0 }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Start at login")
-                        Text("Run this endpoint whenever LLM Proxy launches.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-                .disabled(!apiKey.isConfigured(chat.backend.keyScope))
-            }
-            Section("\(chat.backend.title) models") {
-                ForEach(chat.backend.models) { model in
-                    LabeledContent(model.displayName) {
-                        Text(model.rawValue).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
+                            if index < chat.backend.models.count - 1 {
+                                PanelDivider()
+                            }
+                        }
                     }
                 }
             }
+            .padding(10)
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.top, 8, for: .scrollContent)
+        .scrollIndicators(.hidden)
         .onAppear { portText = String(chat.config.port) }
     }
 

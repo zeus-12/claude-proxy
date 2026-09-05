@@ -36,7 +36,7 @@ final class VoiceController: ObservableObject {
         if config.autoStart { start() }
     }
 
-    var isActive: Bool { running }
+    var isEnabled: Bool { config.autoStart }
 
     /// Real status for the shared endpoint UI, derived from live server events.
     var status: InstanceStatus {
@@ -47,16 +47,12 @@ final class VoiceController: ObservableObject {
     // MARK: - Lifecycle
 
     func toggle() {
-        if running { stop() } else { start() }
+        config.autoStart.toggle()
+        if config.autoStart { start() } else { stop() }
     }
 
     func start() {
         wantsRunning = true
-        guard APIKey.isConfigured(.voice) else {
-            running = false
-            error = "Set an access key in Settings first"
-            return
-        }
         // Not `guard server == nil`: a server that failed to bind is still a
         // live object, and refusing to replace it made every retry a no-op
         // until the app was relaunched.

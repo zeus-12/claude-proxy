@@ -15,9 +15,9 @@ final class ChatController: ObservableObject {
     let backend: ChatBackend
 
     /// Whether the endpoint is *meant* to be up. Distinct from `status`, which
-    /// is the real listener state: a failed bind reports `.failed` (and so
-    /// `isActive == false`), and a later port change has to retry rather than
-    /// conclude the user had deliberately stopped it.
+    /// is the real listener state: a failed bind reports `.failed`, and a later
+    /// port change has to retry rather than conclude the user had deliberately
+    /// stopped it.
     private var wantsRunning = false
 
     /// Invalidates callbacks from a server we've discarded. A cancelled listener
@@ -41,20 +41,17 @@ final class ChatController: ObservableObject {
     var isAvailable: Bool {
         backend == .claude ? ToolLocator.resolve() != nil : ToolLocator.resolveCodex() != nil
     }
-    var isActive: Bool { status.isActive }
+    var isEnabled: Bool { config.autoStart }
 
     // MARK: - Lifecycle
 
     func toggle() {
-        if status.isActive { stop() } else { start() }
+        config.autoStart.toggle()
+        if config.autoStart { start() } else { stop() }
     }
 
     func start() {
         wantsRunning = true
-        guard APIKey.isConfigured(backend.keyScope) else {
-            status = .failed("Set an access key in Settings first")
-            return
-        }
         // Not `guard server == nil`: a server that failed to bind is still a
         // live object, and refusing to replace it made every retry a no-op
         // until the app was relaunched.
@@ -112,10 +109,10 @@ final class ChatController: ObservableObject {
         let store = dir.appendingPathComponent("\(backend.rawValue)-chat-endpoint.json")
         if let data = try? Data(contentsOf: store),
            let decoded = try? JSONDecoder().decode(ChatEndpoint.self, from: data) {
-            return decoded
+            return migrateCodexDefaultPort(decoded, backend: backend)
         }
         // The old combined Chat endpoint becomes the Claude endpoint. Codex is
-        // new and starts independently on 8788, avoiding a silent behavior swap.
+        // new and starts independently, avoiding a silent behavior swap.
         if backend == .claude {
             let combined = dir.appendingPathComponent("chat-endpoint.json")
             if let data = try? Data(contentsOf: combined),
@@ -133,5 +130,17 @@ final class ChatController: ObservableObject {
             return ChatEndpoint(port: port, autoStart: autoStart)
         }
         return ChatEndpoint(port: backend.defaultPort)
+    }
+
+    /// Moves existing Codex installs off the old 8788 default. Nothing records
+    /// whether a stored port was chosen or defaulted, so a user who deliberately
+    /// picked 8788 is moved too — acceptable only because 8788 was the default
+    /// for a single release and is a far more collision-prone port than 17878.
+    private static func migrateCodexDefaultPort(
+        _ endpoint: ChatEndpoint,
+        backend: ChatBackend
+    ) -> ChatEndpoint {
+        guard backend == .codex, endpoint.port == 8788 else { return endpoint }
+        return ChatEndpoint(port: backend.defaultPort, autoStart: endpoint.autoStart)
     }
 }

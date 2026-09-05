@@ -180,7 +180,33 @@ enum ProxySelfTest {
                   blankContent.count == 1 && blankContent[0]["type"] as? String == "image")
         }
 
-        print("ProxySelfTest — access key")
+        print("ProxySelfTest — browser origin policy")
+
+        do {
+            let allowed: Set<String> = ["http://localhost:3000"]
+            func decide(_ origin: String?) -> OriginPolicy.Decision {
+                OriginPolicy.decide(originHeader: origin, allowed: allowed)
+            }
+            check("no Origin is allowed", decide(nil) == .allowedWithoutOrigin)
+            check("blank Origin is allowed", decide("   ") == .allowedWithoutOrigin)
+            check("unlisted origin denied", decide("https://evil.example") == .denied)
+            check("listed origin allowed",
+                  decide("http://localhost:3000") == .allowed("http://localhost:3000"))
+            check("port mismatch denied", decide("http://localhost:3001") == .denied)
+            check("scheme mismatch denied", decide("https://localhost:3000") == .denied)
+            check("null origin denied", decide("null") == .denied)
+            check("null origin denied even if allowlisted",
+                  OriginPolicy.decide(originHeader: "null", allowed: ["null"]) == .denied)
+            check("nothing ships allowlisted", OriginPolicy.allowed.isEmpty)
+            check("every browser origin denied by default",
+                  OriginPolicy.decide(originHeader: "http://localhost:3000").isDenied)
+            check("denied origin echoes no header", decide("https://evil.example").echoedOrigin == nil)
+            check("allowed origin is echoed back",
+                  decide("http://localhost:3000").echoedOrigin == "http://localhost:3000")
+            check("no-Origin request echoes no header", decide(nil).echoedOrigin == nil)
+        }
+
+        print("ProxySelfTest — API key")
 
         do {
             check("bearer header",
@@ -204,6 +230,23 @@ enum ProxySelfTest {
             check("missing key rejected", !APIKey.accepts(nil, required: "cp-abc"))
             check("prefix of key rejected", !APIKey.accepts("cp-ab", required: "cp-abc"))
             check("empty requirement rejects", !APIKey.accepts(nil, required: ""))
+            check("API key protection is optional",
+                  APIKey.authorizes(nil, protectionEnabled: false, required: nil))
+            check("enabled protection needs a configured API key",
+                  !APIKey.authorizes(nil, protectionEnabled: true, required: nil))
+            check("enabled protection accepts the matching API key",
+                  APIKey.authorizes("cp-abc", protectionEnabled: true, required: "cp-abc"))
+            check("environment API key enables protection",
+                  APIKey.protectionEnabled(environmentKey: "cp-abc", preference: false))
+            check("blank environment API key does not enable protection",
+                  !APIKey.protectionEnabled(environmentKey: "  \n", preference: false))
+            check("saved preference enables protection without an environment API key",
+                  APIKey.protectionEnabled(environmentKey: nil, preference: true))
+
+            check("environment key locks the requirement toggle",
+                  APIKey.isEnvironmentManaged(.claude) == (ProcessInfo.processInfo
+                    .environment[APIKey.environmentName(for: .claude)]?
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false))
 
             let generated = APIKey.generate()
             check("generated key is prefixed", generated.hasPrefix("llmp-"))
@@ -217,6 +260,7 @@ enum ProxySelfTest {
 
         check("Claude endpoint starts disabled", !ChatEndpoint().autoStart)
         check("Codex endpoint starts disabled", !ChatEndpoint(port: ChatBackend.codex.defaultPort).autoStart)
+        check("Codex uses its uncommon default port", ChatBackend.codex.defaultPort == 17878)
         check("Voice endpoint starts disabled", !VoiceEndpoint().autoStart)
 
         let startupController = MainActor.assumeIsolated {
@@ -224,7 +268,7 @@ enum ProxySelfTest {
                 loadState: { _ in .disabled }
             )
         }
-        check("access keys start unconfigured", MainActor.assumeIsolated {
+        check("API keys start unconfigured", MainActor.assumeIsolated {
             APIKeyScope.allCases.allSatisfy { startupController.state($0) == .disabled }
         })
 

@@ -9,7 +9,7 @@ enum ChatBackend: String, CaseIterable, Codable, Identifiable, Sendable {
     var title: String { self == .claude ? "Claude" : "Codex" }
     var subtitle: String { self == .claude ? "Claude Code subscription" : "Codex subscription" }
     var icon: String { self == .claude ? "sparkles" : "chevron.left.forwardslash.chevron.right" }
-    var defaultPort: Int { self == .claude ? 8787 : 8788 }
+    var defaultPort: Int { self == .claude ? 8787 : 17878 }
     var keyScope: APIKeyScope { self == .claude ? .claude : .codex }
     var models: [ChatModel] { ChatModel.allCases.filter { $0.backend == self } }
     var allowedIDs: [String] { models.map(\.rawValue) }
